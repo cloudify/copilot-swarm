@@ -748,10 +748,29 @@ export class MonitorEngine {
           this.workingPRs.set(prUrl, now);
           this.server.log(`Session started for PR: ${result.pr.title}`);
         }
-        // If already working, we'll accumulate time during next update
+        // If already working, add time since last update
+        else {
+          const startTime = this.workingPRs.get(prUrl);
+          if (startTime) {
+            const timeSinceStart = now.getTime() - startTime.getTime();
+            // Only add time if this is a reasonable duration (less than 2x refresh interval)
+            const maxReasonableDuration = this.slowRefreshInterval * 2 * 1000;
+            if (timeSinceStart <= maxReasonableDuration) {
+              // Add the elapsed time since we started tracking this session
+              const sessionDuration = timeSinceStart;
+              this.totalSessionTimeMs += sessionDuration;
+              
+              const sessionMinutes = Math.floor(sessionDuration / 60000);
+              const sessionSeconds = Math.floor((sessionDuration % 60000) / 1000);
+              this.server.log(`Ongoing session for PR: ${result.pr.title} (+${sessionMinutes}m ${sessionSeconds}s, total: ${this.formatTotalSessionTime()})`);
+            }
+            // Reset the start time to now for next measurement
+            this.workingPRs.set(prUrl, now);
+          }
+        }
       } else if (this.workingPRs.has(prUrl)) {
         // PR is no longer working and was previously working
-        // PR just finished working - add the session time
+        // PR just finished working - add the final session time
         const startTime = this.workingPRs.get(prUrl);
         if (startTime) {
           const sessionDuration = now.getTime() - startTime.getTime();
@@ -760,16 +779,9 @@ export class MonitorEngine {
           
           const sessionMinutes = Math.floor(sessionDuration / 60000);
           const sessionSeconds = Math.floor((sessionDuration % 60000) / 1000);
-          this.server.log(`Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s)`);
+          this.server.log(`Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s, total: ${this.formatTotalSessionTime()})`);
         }
       }
-    }
-    
-    // Add time for currently working PRs since last update
-    for (const [_prUrl, _startTime] of this.workingPRs.entries()) {
-      // This is an approximation - we add the interval time for active sessions
-      // In a real implementation, we might track this more precisely
-      this.totalSessionTimeMs += this.slowRefreshInterval * 1000; // Add refresh interval time
     }
   }
 }
