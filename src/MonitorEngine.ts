@@ -34,6 +34,10 @@ export class MonitorEngine {
   private stablePRs: Set<string> = new Set(); // URLs of PRs without recent activity
   private fastRefreshInterval: number = 15; // seconds for active PRs (increased from 5)
   private slowRefreshInterval: number = 60; // seconds for stable PRs (increased from 30)
+  
+  // Session time tracking
+  private totalSessionTimeMs: number = 0;
+  private workingPRs: Map<string, Date> = new Map(); // Track when each PR started working
 
   constructor(options: MonitorEngineOptions) {
     this.options = options;
@@ -374,6 +378,9 @@ export class MonitorEngine {
       this.lastPullRequestData = webData;
       this.server.updatePullRequests(webData);
 
+      // Update session time tracking
+      this.updateSessionTime(results);
+
       // Update status bar
       const activeCopilot = results.filter(
         (result) => result.state === "working"
@@ -381,6 +388,7 @@ export class MonitorEngine {
       const statusData = {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
+        totalSessionTime: this.formatTotalSessionTime(),
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.options.interval,
       };
@@ -474,6 +482,9 @@ export class MonitorEngine {
       this.lastPullRequestData = webData;
       this.server.updatePullRequests(webData);
 
+      // Update session time tracking
+      this.updateSessionTime(results);
+
       // Update status bar
       const activeCopilot = results.filter(
         (result) => result.state === "working"
@@ -481,6 +492,7 @@ export class MonitorEngine {
       const statusData = {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
+        totalSessionTime: this.formatTotalSessionTime(),
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.slowRefreshInterval,
       };
@@ -707,5 +719,57 @@ export class MonitorEngine {
   private getNextRefreshTime(): string {
     // Return seconds until next refresh for better client-side countdown
     return `${this.options.interval}s`;
+  }
+
+  private formatTotalSessionTime(): string {
+    if (this.totalSessionTimeMs === 0) {
+      return "00:00:00";
+    }
+    
+    const totalSeconds = Math.floor(this.totalSessionTimeMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private updateSessionTime(results: any[]): void {
+    const now = new Date();
+    
+    // Process each PR to track session timing
+    for (const result of results) {
+      const prUrl = result.pr.html_url;
+      
+      if (result.state === "working") {
+        // PR is currently working
+        if (!this.workingPRs.has(prUrl)) {
+          // PR just started working
+          this.workingPRs.set(prUrl, now);
+          this.server.log(`Session started for PR: ${result.pr.title}`);
+        }
+        // If already working, we'll accumulate time during next update
+      } else if (this.workingPRs.has(prUrl)) {
+        // PR is no longer working and was previously working
+        // PR just finished working - add the session time
+        const startTime = this.workingPRs.get(prUrl);
+        if (startTime) {
+          const sessionDuration = now.getTime() - startTime.getTime();
+          this.totalSessionTimeMs += sessionDuration;
+          this.workingPRs.delete(prUrl);
+          
+          const sessionMinutes = Math.floor(sessionDuration / 60000);
+          const sessionSeconds = Math.floor((sessionDuration % 60000) / 1000);
+          this.server.log(`Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s)`);
+        }
+      }
+    }
+    
+    // Add time for currently working PRs since last update
+    for (const [_prUrl, _startTime] of this.workingPRs.entries()) {
+      // This is an approximation - we add the interval time for active sessions
+      // In a real implementation, we might track this more precisely
+      this.totalSessionTimeMs += this.slowRefreshInterval * 1000; // Add refresh interval time
+    }
   }
 }

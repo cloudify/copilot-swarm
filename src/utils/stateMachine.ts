@@ -32,6 +32,8 @@ export interface StateContext {
   runningWorkflowRuns: number[]; // Track currently running CI workflows
   sessionCount: number; // Track number of completed copilot sessions
   maxSessions: number; // Maximum allowed sessions
+  currentSessionStartTime?: Date; // Track when current Copilot session started
+  totalSessionTimeMs: number; // Total accumulated session time in milliseconds
 }
 
 export interface StateTransition {
@@ -67,6 +69,9 @@ export class CopilotStateMachine {
       fromState: "IDLE",
       event: "COPILOT_WORK_STARTED",
       toState: "COPILOT_WORKING",
+      action: (ctx) => {
+        ctx.currentSessionStartTime = new Date();
+      },
     },
 
     // From COPILOT_WORKING
@@ -77,6 +82,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 >= ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🚫 Max sessions reached (${ctx.sessionCount}/${ctx.maxSessions}) - no further copilot work allowed`,
           "warning"
@@ -90,6 +101,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 < ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `✅ Copilot session completed (${ctx.sessionCount}/${ctx.maxSessions})`,
           "info"
@@ -103,6 +120,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 >= ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🚫 Max sessions reached (${ctx.sessionCount}/${ctx.maxSessions}) - no further copilot work allowed`,
           "warning"
@@ -116,6 +139,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 < ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `❌ Copilot session failed (${ctx.sessionCount}/${ctx.maxSessions})`,
           "error"
@@ -179,6 +208,9 @@ export class CopilotStateMachine {
       fromState: "AUTO_FIX_REQUESTED",
       event: "COPILOT_WORK_STARTED",
       toState: "AUTO_FIX_IN_PROGRESS",
+      action: (ctx) => {
+        ctx.currentSessionStartTime = new Date();
+      },
     },
 
     // From AUTO_FIX_IN_PROGRESS
@@ -189,6 +221,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 >= ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🚫 Max sessions reached (${ctx.sessionCount}/${ctx.maxSessions}) - no further copilot work allowed`,
           "warning"
@@ -202,6 +240,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.autoApproveEnabled && ctx.sessionCount + 1 < ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🔧 Auto-fix completed (${ctx.sessionCount}/${ctx.maxSessions}) - ready to rerun workflows`,
           "success"
@@ -215,6 +259,12 @@ export class CopilotStateMachine {
       condition: (ctx) => !ctx.autoApproveEnabled && ctx.sessionCount + 1 < ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🔧 Auto-fix completed (${ctx.sessionCount}/${ctx.maxSessions}) - waiting for manual workflow rerun`,
           "info"
@@ -228,6 +278,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 >= ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `🚫 Max sessions reached (${ctx.sessionCount}/${ctx.maxSessions}) - no further copilot work allowed`,
           "warning"
@@ -241,6 +297,12 @@ export class CopilotStateMachine {
       condition: (ctx) => ctx.sessionCount + 1 < ctx.maxSessions,
       action: (ctx) => {
         ctx.sessionCount++;
+        // Calculate and add session duration
+        if (ctx.currentSessionStartTime) {
+          const sessionDuration = new Date().getTime() - ctx.currentSessionStartTime.getTime();
+          ctx.totalSessionTimeMs += sessionDuration;
+          ctx.currentSessionStartTime = undefined;
+        }
         this.config.onLog?.(
           `❌ Auto-fix failed (${ctx.sessionCount}/${ctx.maxSessions})`,
           "error"
@@ -499,5 +561,20 @@ export class CopilotStateMachine {
   // Reset the state machine
   async reset(): Promise<void> {
     await this.transition("RESET");
+  }
+
+  // Get formatted total session time as HH:MM:SS
+  getTotalSessionTime(): string {
+    const totalMs = this.context.totalSessionTimeMs;
+    if (totalMs === 0) {
+      return "00:00:00";
+    }
+    
+    const totalSeconds = Math.floor(totalMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
 }

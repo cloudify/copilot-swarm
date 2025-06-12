@@ -16,6 +16,7 @@ describe("Max Sessions Functionality", () => {
       runningWorkflowRuns: [],
       sessionCount: 0,
       maxSessions: 3, // Use a small number for testing
+      totalSessionTimeMs: 0,
     };
 
     stateMachine = new CopilotStateMachine(context, {

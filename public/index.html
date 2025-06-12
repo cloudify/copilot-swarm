@@ -538,6 +538,10 @@
             <span id="active-copilot">-</span>
           </div>
           <div class="status-item">
+            <span>⏱️ Total Session Time:</span>
+            <span id="total-session-time">00:00:00</span>
+          </div>
+          <div class="status-item">
             <span>🔄 Next Refresh:</span>
             <span id="next-refresh">-</span>
           </div>
@@ -931,6 +935,8 @@
           status.totalPrs || "-";
         document.getElementById("active-copilot").textContent =
           status.activeCopilot || "-";
+        document.getElementById("total-session-time").textContent =
+          status.totalSessionTime || "00:00:00";
 
         // Update refresh interval if provided
         if (status.refreshInterval) {
