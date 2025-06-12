@@ -18,6 +18,10 @@ describe("CopilotStateMachine", () => {
       autoApproveEnabled: true,
       username: "testuser",
       pendingWorkflowRuns: [],
+      runningWorkflowRuns: [],
+      sessionCount: 0,
+      maxSessions: 50,
+      totalSessionTimeMs: 0,
     };
 
     stateMachine = new CopilotStateMachine(context, {

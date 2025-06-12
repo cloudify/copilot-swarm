@@ -14,6 +14,9 @@ describe("CI Running State", () => {
       username: "test-user",
       pendingWorkflowRuns: [],
       runningWorkflowRuns: [],
+      sessionCount: 0,
+      maxSessions: 50,
+      totalSessionTimeMs: 0,
     };
 
     logs = [];

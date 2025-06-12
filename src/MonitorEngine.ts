@@ -34,6 +34,12 @@ export class MonitorEngine {
   private stablePRs: Set<string> = new Set(); // URLs of PRs without recent activity
   private fastRefreshInterval: number = 15; // seconds for active PRs (increased from 5)
   private slowRefreshInterval: number = 60; // seconds for stable PRs (increased from 30)
+  
+  // Session time tracking
+  private totalSessionTimeMs: number = 0;
+  private historicalSessionTimeMs: number = 0; // Historical completed sessions
+  private workingPRs: Map<string, Date> = new Map(); // Track when each PR started working
+  private realTimeUpdateInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: MonitorEngineOptions) {
     this.options = options;
@@ -89,6 +95,21 @@ export class MonitorEngine {
 
       // Start monitoring loop
       this.isRunning = true;
+      
+      // Send initial loading status
+      const initialStatusData = {
+        totalPrs: 0,
+        activeCopilot: 0,
+        totalSessionTime: "0s",
+        totalSessionTimeLoading: true, // Show loading state
+        nextRefresh: "-",
+        refreshInterval: this.slowRefreshInterval,
+      };
+      this.server.updateStatus(initialStatusData);
+      
+      // Initialize historical session time
+      await this.initializeHistoricalSessionTime();
+      
       await this.refreshAllData();
 
       // Set up dual refresh intervals
@@ -122,6 +143,13 @@ export class MonitorEngine {
         }
       }, this.fastRefreshInterval * 1000);
 
+      // Real-time session time updates every second when there are active sessions
+      this.realTimeUpdateInterval = setInterval(() => {
+        if (this.isRunning && this.workingPRs.size > 0) {
+          this.updateRealTimeSessionDisplay();
+        }
+      }, 1000);
+
       this.server.log("Monitor started successfully");
     } catch (error) {
       this.server.log(
@@ -144,6 +172,11 @@ export class MonitorEngine {
     if (this.fastIntervalId) {
       clearInterval(this.fastIntervalId);
       this.fastIntervalId = null;
+    }
+
+    if (this.realTimeUpdateInterval) {
+      clearInterval(this.realTimeUpdateInterval);
+      this.realTimeUpdateInterval = null;
     }
 
     this.server.log("Monitor stopped");
@@ -374,6 +407,9 @@ export class MonitorEngine {
       this.lastPullRequestData = webData;
       this.server.updatePullRequests(webData);
 
+      // Update session time tracking
+      this.updateSessionTime(results);
+
       // Update status bar
       const activeCopilot = results.filter(
         (result) => result.state === "working"
@@ -381,6 +417,8 @@ export class MonitorEngine {
       const statusData = {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
+        totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.options.interval,
       };
@@ -474,6 +512,9 @@ export class MonitorEngine {
       this.lastPullRequestData = webData;
       this.server.updatePullRequests(webData);
 
+      // Update session time tracking
+      this.updateSessionTime(results);
+
       // Update status bar
       const activeCopilot = results.filter(
         (result) => result.state === "working"
@@ -481,6 +522,8 @@ export class MonitorEngine {
       const statusData = {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
+        totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.slowRefreshInterval,
       };
@@ -707,5 +750,193 @@ export class MonitorEngine {
   private getNextRefreshTime(): string {
     // Return seconds until next refresh for better client-side countdown
     return `${this.options.interval}s`;
+  }
+
+  private formatTotalSessionTime(): string {
+    // Calculate total time including historical + current ongoing sessions
+    let currentActiveSessionTime = 0;
+    const now = new Date();
+    
+    // Add time for currently active sessions
+    for (const startTime of this.workingPRs.values()) {
+      currentActiveSessionTime += now.getTime() - startTime.getTime();
+    }
+    
+    const totalMs = this.historicalSessionTimeMs + this.totalSessionTimeMs + currentActiveSessionTime;
+    
+    if (totalMs === 0) {
+      return "0s";
+    }
+    
+    const totalSeconds = Math.floor(totalMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    // Format as human-readable time like "9h 2m 1s"
+    const parts = [];
+    if (hours > 0) {
+      parts.push(`${hours}h`);
+    }
+    if (minutes > 0) {
+      parts.push(`${minutes}m`);
+    }
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    
+    return parts.join(' ');
+  }
+
+  private updateSessionTime(results: any[]): void {
+    const now = new Date();
+    
+    // Process each PR to track session timing
+    for (const result of results) {
+      const prUrl = result.pr.html_url;
+      
+      if (result.state === "working") {
+        // PR is currently working
+        if (!this.workingPRs.has(prUrl)) {
+          // PR just started working - record start time
+          this.workingPRs.set(prUrl, now);
+          this.server.log(`Session started for PR: ${result.pr.title}`);
+        }
+        // If already working, we don't need to do anything here
+        // The real-time display will handle the ongoing time calculation
+      } else if (this.workingPRs.has(prUrl)) {
+        // PR is no longer working and was previously working
+        // PR just finished working - add the final session time
+        const startTime = this.workingPRs.get(prUrl);
+        if (startTime) {
+          const sessionDuration = now.getTime() - startTime.getTime();
+          this.totalSessionTimeMs += sessionDuration;
+          this.workingPRs.delete(prUrl);
+          
+          const sessionMinutes = Math.floor(sessionDuration / 60000);
+          const sessionSeconds = Math.floor((sessionDuration % 60000) / 1000);
+          this.server.log(`Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s, total: ${this.formatTotalSessionTime()})`);
+        }
+      }
+    }
+  }
+
+  private async initializeHistoricalSessionTime(): Promise<void> {
+    try {
+      this.server.log("Calculating historical Copilot session time...");
+      
+      if (!this.api) {
+        throw new Error("API not initialized");
+      }
+
+      let totalHistoricalTime = 0;
+      
+      // Get pull requests with Copilot activity
+      const results = await this.api.collectPRStatuses(
+        this.organizations,
+        this.options.days,
+        { onLog: (message, type) => this.server.log(`[${type.toUpperCase()}] ${message}`) }
+      );
+
+      // Calculate session durations from Copilot events
+      for (const result of results) {
+        try {
+          const sessionTime = await this.calculatePRSessionTime(result.pr);
+          totalHistoricalTime += sessionTime;
+        } catch (error) {
+          this.server.log(
+            `Error calculating session time for PR ${result.pr.html_url}: ${
+              error instanceof Error ? error.message : error
+            }`
+          );
+        }
+      }
+
+      this.historicalSessionTimeMs = totalHistoricalTime;
+      
+      const totalMinutes = Math.floor(totalHistoricalTime / 60000);
+      const totalSeconds = Math.floor((totalHistoricalTime % 60000) / 1000);
+      this.server.log(`Historical session time calculated: ${totalMinutes}m ${totalSeconds}s`);
+      
+    } catch (error) {
+      this.server.log(
+        `Error initializing historical session time: ${
+          error instanceof Error ? error.message : error
+        }`
+      );
+      // Continue with zero historical time if calculation fails
+      this.historicalSessionTimeMs = 0;
+    }
+  }
+
+  private async calculatePRSessionTime(pr: any): Promise<number> {
+    if (!this.api) {
+      return 0;
+    }
+
+    const owner = pr.base?.repo.owner.login || "";
+    const repo = pr.base?.repo.name || "";
+    const number = pr.number;
+
+    if (!owner || !repo) {
+      return 0;
+    }
+
+    // Collect copilot events
+    const copilotEvents = new Set([
+      "copilot_work_started",
+      "copilot_work_finished", 
+      "copilot_work_finished_failure",
+    ]);
+
+    const events: any[] = [];
+    try {
+      for await (const event of this.api.iterIssueEvents(owner, repo, number)) {
+        if (copilotEvents.has(event.event)) {
+          events.push(event);
+        }
+      }
+    } catch {
+      // Skip PRs where we can't fetch events
+      return 0;
+    }
+
+    if (events.length === 0) {
+      return 0;
+    }
+
+    // Calculate session durations from start/end pairs
+    let totalSessionTime = 0;
+    let sessionStart: Date | null = null;
+
+    for (const event of events) {
+      const eventTime = new Date(event.created_at);
+      
+      if (event.event === "copilot_work_started") {
+        sessionStart = eventTime;
+      } else if (
+        (event.event === "copilot_work_finished" || event.event === "copilot_work_finished_failure") &&
+        sessionStart
+      ) {
+        // Calculate session duration
+        const duration = eventTime.getTime() - sessionStart.getTime();
+        totalSessionTime += duration;
+        sessionStart = null;
+      }
+    }
+
+    return totalSessionTime;
+  }
+
+  private updateRealTimeSessionDisplay(): void {
+    // Update status bar with current session time including active sessions
+    if (this.lastStatusData) {
+      const statusData = {
+        ...this.lastStatusData,
+        totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
+      };
+      this.server.updateStatus(statusData);
+    }
   }
 }

@@ -51,6 +51,7 @@ export class PrStateMachineManagerFactory {
         runningWorkflowRuns: [],
         sessionCount: 0,
         maxSessions: options.maxSessions || 50,
+        totalSessionTimeMs: 0,
       };
 
       const config: StateMachineConfig = {

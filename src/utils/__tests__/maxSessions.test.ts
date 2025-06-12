@@ -16,6 +16,7 @@ describe("Max Sessions Functionality", () => {
       runningWorkflowRuns: [],
       sessionCount: 0,
       maxSessions: 3, // Use a small number for testing
+      totalSessionTimeMs: 0,
     };
 
     stateMachine = new CopilotStateMachine(context, {
@@ -135,6 +136,65 @@ describe("Max Sessions Functionality", () => {
       // Reset should work
       await stateMachine.reset();
       expect(stateMachine.getCurrentState()).toBe("IDLE");
+    });
+  });
+
+  describe("Session Timing", () => {
+    it("should track session timing correctly", async () => {
+      const context = stateMachine.getContext();
+      
+      // Initially no session time
+      expect(context.totalSessionTimeMs).toBe(0);
+      expect(stateMachine.getTotalSessionTime()).toBe("00:00:00");
+      
+      // Start a session
+      await stateMachine.transition("COPILOT_WORK_STARTED");
+      const contextAfterStart = stateMachine.getContext();
+      expect(contextAfterStart.currentSessionStartTime).toBeDefined();
+      
+      // Simulate some time passing by manually setting the start time to earlier
+      const fakeStartTime = new Date(Date.now() - 65000); // 1 minute 5 seconds ago
+      stateMachine.updateContext({ currentSessionStartTime: fakeStartTime });
+      
+      // End the session
+      await stateMachine.transition("COPILOT_WORK_FINISHED");
+      const contextAfterEnd = stateMachine.getContext();
+      
+      // Session should be complete
+      expect(contextAfterEnd.currentSessionStartTime).toBeUndefined();
+      expect(contextAfterEnd.totalSessionTimeMs).toBeGreaterThan(60000); // At least 1 minute
+      expect(contextAfterEnd.sessionCount).toBe(1);
+      
+      // Should format time correctly
+      const formattedTime = stateMachine.getTotalSessionTime();
+      expect(formattedTime).toMatch(/00:01:\d{2}/); // Should be in format 00:01:XX
+    });
+
+    it("should accumulate multiple session times", async () => {
+      // First session
+      await stateMachine.transition("COPILOT_WORK_STARTED");
+      const fakeStartTime1 = new Date(Date.now() - 30000); // 30 seconds ago
+      stateMachine.updateContext({ currentSessionStartTime: fakeStartTime1 });
+      await stateMachine.transition("COPILOT_WORK_FINISHED");
+      
+      const contextAfterFirst = stateMachine.getContext();
+      const firstSessionTime = contextAfterFirst.totalSessionTimeMs;
+      expect(firstSessionTime).toBeGreaterThan(25000); // At least 25 seconds
+      
+      // Second session
+      await stateMachine.transition("FAILED_CHECKS_DETECTED");
+      await stateMachine.transition("COPILOT_WORK_STARTED");
+      const fakeStartTime2 = new Date(Date.now() - 45000); // 45 seconds ago
+      stateMachine.updateContext({ currentSessionStartTime: fakeStartTime2 });
+      await stateMachine.transition("COPILOT_WORK_FINISHED");
+      
+      const contextAfterSecond = stateMachine.getContext();
+      expect(contextAfterSecond.totalSessionTimeMs).toBeGreaterThan(firstSessionTime + 40000); // Should have added ~45 seconds
+      expect(contextAfterSecond.sessionCount).toBe(2);
+      
+      // Total time should be formatted correctly
+      const formattedTime = stateMachine.getTotalSessionTime();
+      expect(formattedTime).toMatch(/00:01:\d{2}/); // Should be at least 1 minute total
     });
   });
 });

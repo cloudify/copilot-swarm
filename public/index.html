@@ -538,6 +538,10 @@
             <span id="active-copilot">-</span>
           </div>
           <div class="status-item">
+            <span>⏱️ Total Session Time:</span>
+            <span id="total-session-time">0s</span>
+          </div>
+          <div class="status-item">
             <span>🔄 Next Refresh:</span>
             <span id="next-refresh">-</span>
           </div>
@@ -931,6 +935,14 @@
           status.totalPrs || "-";
         document.getElementById("active-copilot").textContent =
           status.activeCopilot || "-";
+
+        // Handle loading state for session time
+        const sessionTimeElement = document.getElementById("total-session-time");
+        if (status.totalSessionTimeLoading) {
+          sessionTimeElement.innerHTML = '<div class="ci-spinner"></div> Loading...';
+        } else {
+          sessionTimeElement.textContent = status.totalSessionTime || "0s";
+        }
 
         // Update refresh interval if provided
         if (status.refreshInterval) {
