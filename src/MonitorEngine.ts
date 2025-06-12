@@ -96,6 +96,17 @@ export class MonitorEngine {
       // Start monitoring loop
       this.isRunning = true;
       
+      // Send initial loading status
+      const initialStatusData = {
+        totalPrs: 0,
+        activeCopilot: 0,
+        totalSessionTime: "0s",
+        totalSessionTimeLoading: true, // Show loading state
+        nextRefresh: "-",
+        refreshInterval: this.slowRefreshInterval,
+      };
+      this.server.updateStatus(initialStatusData);
+      
       // Initialize historical session time
       await this.initializeHistoricalSessionTime();
       
@@ -407,6 +418,7 @@ export class MonitorEngine {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.options.interval,
       };
@@ -511,6 +523,7 @@ export class MonitorEngine {
         totalPrs: webData.length,
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
         nextRefresh: this.getNextRefreshTime(),
         refreshInterval: this.slowRefreshInterval,
       };
@@ -752,7 +765,7 @@ export class MonitorEngine {
     const totalMs = this.historicalSessionTimeMs + this.totalSessionTimeMs + currentActiveSessionTime;
     
     if (totalMs === 0) {
-      return "00:00:00";
+      return "0s";
     }
     
     const totalSeconds = Math.floor(totalMs / 1000);
@@ -760,7 +773,19 @@ export class MonitorEngine {
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
     
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    // Format as human-readable time like "9h 2m 1s"
+    const parts = [];
+    if (hours > 0) {
+      parts.push(`${hours}h`);
+    }
+    if (minutes > 0) {
+      parts.push(`${minutes}m`);
+    }
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    
+    return parts.join(' ');
   }
 
   private updateSessionTime(results: any[]): void {
@@ -909,6 +934,7 @@ export class MonitorEngine {
       const statusData = {
         ...this.lastStatusData,
         totalSessionTime: this.formatTotalSessionTime(),
+        totalSessionTimeLoading: false, // Historical time calculation complete
       };
       this.server.updateStatus(statusData);
     }
