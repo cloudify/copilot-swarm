@@ -1,0 +1,254 @@
+import React, { useState, useEffect } from "react";
+import { Box, useInput } from "ink";
+import { GitHubAPI } from "../utils/github.js";
+import { saveFullConfig } from "../utils/config.js";
+import { Organization, PullRequest, ConfigFlowProps } from "../types/index.js";
+import { SafeText, ErrorText, HelpBar } from "./ui/index.js";
+import { useErrorState, useTerminalSize } from "../hooks/index.js";
+import { safeConcat } from "../utils/textUtils.js";
+
+function ConfigFlow({
+  token,
+  onConfigComplete,
+}: ConfigFlowProps): React.ReactElement {
+  const [step, setStep] = useState<
+    "loading" | "selectOrgs" | "searchingPRs" | "confirm"
+  >("loading");
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [selectedOrgs, setSelectedOrgs] = useState<Organization[]>([]);
+  const [copilotPRs, setCopilotPRs] = useState<PullRequest[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const { error, setError, clearError } = useErrorState();
+  const terminalSize = useTerminalSize();
+
+  // Wrapper component to add consistent layout with help bar
+  const ConfigFlowWrapper: React.FC<{ children: React.ReactNode }> = ({
+    children,
+  }) => (
+    <Box
+      flexDirection="column"
+      width={terminalSize.width}
+      height={terminalSize.height}
+    >
+      <Box flexDirection="column" padding={1} flexGrow={1}>
+        {children}
+      </Box>
+      <HelpBar terminalWidth={terminalSize.width} />
+    </Box>
+  );
+
+  useEffect(() => {
+    async function loadOrganizations(): Promise<void> {
+      try {
+        clearError();
+        const api = new GitHubAPI(token);
+        const orgs = await api.getOrganizations();
+        setOrganizations(orgs);
+        setCurrentIndex(0);
+        setStep("selectOrgs");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setError(`Failed to load organizations: ${message}`);
+      }
+    }
+
+    loadOrganizations();
+  }, [token, setError, clearError]);
+
+  const searchCopilotPRs = async (): Promise<void> => {
+    try {
+      setStep("searchingPRs");
+      setCurrentIndex(0);
+      clearError();
+
+      const api = new GitHubAPI(token);
+      const orgNames = selectedOrgs.map((org) => org.login);
+
+      // Search for Copilot PRs across all selected organizations
+      const copilotPRs = await api.searchCopilotPRs(orgNames);
+
+      setCopilotPRs(copilotPRs);
+      setStep("confirm");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(`Failed to search for Copilot Pull Requests: ${message}`);
+      setStep("selectOrgs");
+    }
+  };
+
+  const handleConfirm = async (): Promise<void> => {
+    try {
+      const orgNames = selectedOrgs.map((org) => org.login);
+
+      await saveFullConfig({
+        organizations: orgNames,
+        repositories: [], // We don't store specific repositories anymore
+      });
+
+      onConfigComplete(orgNames, []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setError(`Failed to save configuration: ${message}`);
+    }
+  };
+
+  useInput((input, key) => {
+    if (step === "selectOrgs") {
+      if (key.upArrow || input === "k") {
+        setCurrentIndex(Math.max(0, currentIndex - 1));
+      } else if (key.downArrow || input === "j") {
+        setCurrentIndex(Math.min(organizations.length - 1, currentIndex + 1));
+      } else if (input === " ") {
+        const org = organizations[currentIndex];
+        if (org) {
+          const isSelected = selectedOrgs.find((o) => o.login === org.login);
+          if (isSelected) {
+            setSelectedOrgs(selectedOrgs.filter((o) => o.login !== org.login));
+          } else {
+            setSelectedOrgs([...selectedOrgs, org]);
+          }
+        }
+      } else if (key.return) {
+        if (selectedOrgs.length > 0) {
+          clearError();
+          searchCopilotPRs();
+        }
+      }
+    } else if (step === "confirm") {
+      if (key.return) {
+        handleConfirm();
+      }
+    }
+  });
+
+  if (error) {
+    return (
+      <ConfigFlowWrapper>
+        <SafeText bold color="red">
+          Configuration Error
+        </SafeText>
+        <ErrorText error={error} />
+        <SafeText> </SafeText>
+        <SafeText>Please restart the application and try again.</SafeText>
+      </ConfigFlowWrapper>
+    );
+  }
+
+  if (step === "loading") {
+    return (
+      <ConfigFlowWrapper>
+        <SafeText bold color="cyan">
+          🔄 Loading Configuration
+        </SafeText>
+        <SafeText>Please wait while we load your GitHub data...</SafeText>
+      </ConfigFlowWrapper>
+    );
+  }
+
+  if (step === "searchingPRs") {
+    return (
+      <ConfigFlowWrapper>
+        <SafeText bold color="cyan">
+          🔍 Searching for Copilot Pull Requests
+        </SafeText>
+        <SafeText>
+          Scanning repositories in selected organizations for Pull Requests
+          assigned to Copilot...
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          This may take a moment depending on the number of repositories.
+        </SafeText>
+      </ConfigFlowWrapper>
+    );
+  }
+
+  if (step === "selectOrgs") {
+    return (
+      <ConfigFlowWrapper>
+        <SafeText bold color="cyan">
+          📂 Select Organizations and User
+        </SafeText>
+        <SafeText>
+          Choose organizations and your user account to monitor for Copilot PRs
+          (use ↑/↓ or k/j to navigate, Space to select):
+        </SafeText>
+        <SafeText> </SafeText>
+        {organizations.map((org, index) => {
+          const isSelected = Boolean(
+            selectedOrgs.find((o) => o.login === org.login)
+          );
+          const isCurrent = index === currentIndex;
+          const description = safeConcat(org.description, " - ");
+          const isUser =
+            org.description &&
+            org.description.includes("Your personal repositories");
+
+          return (
+            <SafeText key={org.id} color={isCurrent ? "yellow" : "white"}>
+              {`${isCurrent ? "► " : "  "}${isSelected ? "✓ " : "○ "}${
+                isUser ? "👤 " : "🏢 "
+              }${org.login}${description || ""}`}
+            </SafeText>
+          );
+        })}
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          {`Selected: ${selectedOrgs.length.toString()} | Press Enter to search for Copilot PRs${
+            selectedOrgs.length === 0 ? " (select at least one)" : ""
+          }`}
+        </SafeText>
+      </ConfigFlowWrapper>
+    );
+  }
+
+  if (step === "confirm") {
+    return (
+      <ConfigFlowWrapper>
+        <SafeText bold color="cyan">
+          ✅ Confirm Configuration
+        </SafeText>
+        <SafeText>You selected:</SafeText>
+        <SafeText> </SafeText>
+        <SafeText
+          bold
+        >{`Organizations (${selectedOrgs.length.toString()}):`}</SafeText>
+        {selectedOrgs.map((org) => (
+          <SafeText key={org.id}>{` • ${org.login}`}</SafeText>
+        ))}
+        <SafeText> </SafeText>
+        <SafeText
+          bold
+        >{`Copilot Pull Requests Found: ${copilotPRs.length.toString()}`}</SafeText>
+        {copilotPRs.slice(0, 10).map((pr) => (
+          <SafeText key={pr.id} color="green">{` • ${pr.title} (${
+            pr.base?.repo?.full_name ||
+            pr.repository?.full_name ||
+            "Unknown repo"
+          })`}</SafeText>
+        ))}
+        {copilotPRs.length > 10 && (
+          <SafeText>{` ... and ${(
+            copilotPRs.length - 10
+          ).toString()} more Pull Requests`}</SafeText>
+        )}
+        {copilotPRs.length === 0 && (
+          <SafeText color="yellow">
+            {" "}
+            No Copilot Pull Requests found in the selected organizations.
+          </SafeText>
+        )}
+        <SafeText> </SafeText>
+        <SafeText>Press Enter to save and continue</SafeText>
+      </ConfigFlowWrapper>
+    );
+  }
+
+  return (
+    <ConfigFlowWrapper>
+      <SafeText>Unexpected state</SafeText>
+    </ConfigFlowWrapper>
+  );
+}
+
+export default ConfigFlow;

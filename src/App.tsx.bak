@@ -1,0 +1,261 @@
+import React, { useState, useEffect } from "react";
+import { Box, Text, useInput } from "ink";
+import AuthFlow from "./components/AuthFlow.js";
+import ConfigFlow from "./components/ConfigFlow.js";
+import MainDisplay from "./components/MainDisplay.js";
+import { loadConfig, loadAuth, loadOrganizations } from "./utils/config.js";
+import { GitHubAPI } from "./utils/github.js";
+
+// Add debug logging helper
+const DEBUG =
+  process.env.DEBUG === "true" || process.env.NODE_ENV === "development";
+const debugLog = (message: string, data?: any) => {
+  if (DEBUG) {
+    console.log(
+      `[App Debug] ${message}`,
+      data ? JSON.stringify(data, null, 2) : ""
+    );
+  }
+};
+
+interface AppProps {
+  config: boolean;
+  interval: number;
+  days: number;
+  resumeOnFailure: boolean;
+  autoFix: boolean;
+  autoApprove: boolean;
+}
+
+function App({
+  config: forceConfig,
+  interval,
+  days,
+  resumeOnFailure,
+  autoFix,
+  autoApprove,
+}: AppProps): React.ReactElement {
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [repositories, setRepositories] = useState<string[]>([]);
+  const [organizations, setOrganizations] = useState<string[]>([]);
+  const [showAuth, setShowAuth] = useState<boolean>(false);
+  const [showConfig, setShowConfig] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Global keyboard handler for quit functionality
+  useInput((input, key) => {
+    if (input.toLowerCase() === "q" && !key.ctrl && !key.meta) {
+      debugLog("User pressed Q to quit");
+      process.exit(0);
+    }
+  });
+
+  useEffect(() => {
+    async function initialize(): Promise<void> {
+      try {
+        debugLog("Starting application initialization", {
+          forceConfig,
+          interval,
+          days,
+          resumeOnFailure,
+          autoFix,
+          autoApprove,
+        });
+
+        // Check for existing auth
+        const auth = await loadAuth();
+        debugLog("Auth check completed", {
+          hasAuth: !!auth,
+          hasToken: !!auth?.token,
+          hasClientId: !!auth?.clientId,
+        });
+
+        if (!auth || forceConfig) {
+          debugLog("No auth found or config forced, showing auth flow");
+          setShowAuth(true);
+          setIsLoading(false);
+          return;
+        }
+
+        // Validate token scopes
+        debugLog("Validating token scopes");
+        const api = new GitHubAPI(auth.token);
+        const verification = await api.verifyToken();
+
+        if (!verification.valid) {
+          debugLog("Token validation failed, showing auth flow");
+          setShowAuth(true);
+          setIsLoading(false);
+          return;
+        }
+
+        const scopeError = api.getScopeErrorMessage(verification.scopes);
+        if (scopeError) {
+          debugLog("Token missing required scopes", {
+            currentScopes: verification.scopes,
+            error: scopeError,
+          });
+          console.error(scopeError);
+          console.error(
+            "Please re-authenticate to get a token with all required scopes."
+          );
+          setShowAuth(true);
+          setIsLoading(false);
+          return;
+        }
+
+        debugLog("Token validation successful", {
+          scopes: verification.scopes,
+          user: verification.user?.login,
+        });
+
+        setAuthToken(auth.token);
+
+        // Check for existing config
+        const repos = await loadConfig();
+        const orgs = await loadOrganizations();
+        debugLog("Config check completed", {
+          repoCount: repos?.length || 0,
+          orgCount: orgs?.length || 0,
+          repos: repos,
+          orgs: orgs,
+        });
+
+        if (
+          ((!repos || repos.length === 0) && (!orgs || orgs.length === 0)) ||
+          forceConfig
+        ) {
+          debugLog(
+            "No repositories/organizations found or config forced, showing config flow"
+          );
+          setShowConfig(true);
+          setIsLoading(false);
+          return;
+        }
+
+        setRepositories(repos);
+        setOrganizations(orgs);
+        debugLog("Initialization complete, starting main display");
+        setIsLoading(false);
+      } catch (error) {
+        debugLog("Initialization error", {
+          error: error instanceof Error ? error.message : error,
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        console.error("Initialization error:", error);
+        setShowAuth(true);
+        setIsLoading(false);
+      }
+    }
+
+    initialize();
+  }, [forceConfig]);
+  useEffect(() => {
+    debugLog("App state updated", {
+      authToken,
+      repositories,
+      organizations,
+      showAuth,
+      showConfig,
+      isLoading,
+      days,
+      resumeOnFailure,
+      autoFix,
+      autoApprove,
+    });
+  }, [
+    authToken,
+    repositories,
+    organizations,
+    showAuth,
+    showConfig,
+    isLoading,
+    days,
+    resumeOnFailure,
+    autoFix,
+    autoApprove,
+  ]);
+
+  if (isLoading) {
+    return (
+      <Box
+        justifyContent="center"
+        alignItems="center"
+        width="100%"
+        height="100%"
+      >
+        <Text>Loading...</Text>
+      </Box>
+    );
+  }
+
+  if (showAuth) {
+    debugLog("Rendering auth flow");
+    return (
+      <AuthFlow
+        onAuthComplete={(token: string) => {
+          debugLog("Auth completed", { tokenLength: token.length });
+          setAuthToken(token);
+          setShowAuth(false);
+          setShowConfig(true);
+        }}
+      />
+    );
+  }
+
+  if (showConfig && authToken) {
+    debugLog("Rendering config flow", { hasToken: !!authToken });
+    return (
+      <ConfigFlow
+        token={authToken}
+        onConfigComplete={(orgs: string[], repos: string[]) => {
+          debugLog("Config completed", {
+            orgCount: orgs.length,
+            repoCount: repos.length,
+          });
+          setOrganizations(orgs);
+          setRepositories(repos);
+          setShowConfig(false);
+        }}
+      />
+    );
+  }
+
+  if (authToken && (repositories.length > 0 || organizations.length > 0)) {
+    debugLog("Rendering main display", {
+      hasToken: !!authToken,
+      repoCount: repositories.length,
+      orgCount: organizations.length,
+    });
+    return (
+      <MainDisplay
+        token={authToken}
+        organizations={organizations}
+        repositories={repositories}
+        refreshInterval={interval}
+        days={days}
+        resumeOnFailure={resumeOnFailure}
+        autoFix={autoFix}
+        autoApprove={autoApprove}
+      />
+    );
+  }
+
+  debugLog("Rendering error state", {
+    hasToken: !!authToken,
+    repoCount: repositories.length,
+    orgCount: organizations.length,
+    showAuth,
+    showConfig,
+    isLoading,
+  });
+
+  return (
+    <Box justifyContent="center" alignItems="center" width="100%" height="100%">
+      <Text color="red">Error: Missing required configuration</Text>
+      <Text color="yellow">Debug: Run with --config to reconfigure</Text>
+    </Box>
+  );
+}
+
+export default App;

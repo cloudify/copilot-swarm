@@ -1,0 +1,336 @@
+import React, { useState } from "react";
+import { Box, useInput } from "ink";
+import { GitHubAPI } from "../utils/github.js";
+import { GitHubOAuth, createDefaultOAuthConfig } from "../utils/oauth.js";
+import { saveAuth } from "../utils/config.js";
+import { AuthFlowProps } from "../types/index.js";
+import { SafeText, ErrorText, HelpBar } from "./ui/index.js";
+import { useErrorState } from "../hooks/useSafeState.js";
+import { useTerminalSize } from "../hooks/index.js";
+
+function AuthFlow({ onAuthComplete }: AuthFlowProps): React.ReactElement {
+  const [step, setStep] = useState<
+    "intro" | "setup" | "clientId" | "clientSecret" | "authorizing" | "verify"
+  >("intro");
+  const [clientId, setClientId] = useState<string>("");
+  const [clientSecret, setClientSecret] = useState<string>("");
+  const { error, setError, clearError } = useErrorState();
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [oauth, setOAuth] = useState<GitHubOAuth | null>(null);
+  const terminalSize = useTerminalSize();
+
+  // Wrapper component to add consistent layout with help bar
+  const AuthFlowWrapper: React.FC<{ children: React.ReactNode }> = ({
+    children,
+  }) => (
+    <Box
+      flexDirection="column"
+      width={terminalSize.width}
+      height={terminalSize.height}
+    >
+      <Box flexDirection="column" padding={1} flexGrow={1}>
+        {children}
+      </Box>
+      <HelpBar terminalWidth={terminalSize.width} />
+    </Box>
+  );
+
+  useInput((input, key) => {
+    // Handle text input for clientId step
+    if (step === "clientId") {
+      if (key.return) {
+        handleClientIdSubmit();
+      } else if (key.backspace || key.delete) {
+        setClientId((prev) => prev.slice(0, -1));
+      } else if (input && !key.ctrl && !key.meta) {
+        setClientId((prev) => prev + input);
+      }
+      return;
+    }
+
+    // Handle text input for clientSecret step
+    if (step === "clientSecret") {
+      if (key.return) {
+        handleClientSecretSubmit();
+      } else if (key.backspace || key.delete) {
+        setClientSecret((prev) => prev.slice(0, -1));
+      } else if (input && !key.ctrl && !key.meta) {
+        setClientSecret((prev) => prev + input);
+      }
+      return;
+    }
+
+    if (key.return && step === "intro") {
+      setStep("setup");
+    }
+
+    if (key.return && step === "setup") {
+      setStep("clientId");
+    }
+
+    // Allow user to cancel OAuth flow
+    if ((key.ctrl && input === "c") || key.escape) {
+      if (oauth) {
+        oauth.cancel();
+        setOAuth(null);
+        setStep("setup");
+        setError("OAuth flow cancelled");
+      }
+    }
+  });
+
+  const handleClientIdSubmit = (): void => {
+    clearError();
+    if (!clientId.trim()) {
+      setError("Client ID is required");
+      return;
+    }
+    setStep("clientSecret");
+  };
+
+  const handleClientSecretSubmit = async (): Promise<void> => {
+    clearError();
+    if (!clientSecret.trim()) {
+      setError("Client Secret is required");
+      return;
+    }
+    setStep("authorizing");
+
+    try {
+      // Create OAuth instance
+      const oauthConfig = createDefaultOAuthConfig(clientId, clientSecret);
+      const oauthInstance = new GitHubOAuth(oauthConfig);
+      setOAuth(oauthInstance);
+
+      // Start OAuth flow
+      const result = await oauthInstance.authorize();
+
+      // Verify the token
+      setStep("verify");
+      setIsVerifying(true);
+
+      const api = new GitHubAPI(result.accessToken);
+      const verification = await api.verifyToken();
+
+      if (!verification.valid) {
+        setError(
+          "OAuth completed but token verification failed. Please try again."
+        );
+        setStep("setup");
+        setIsVerifying(false);
+        return;
+      }
+
+      const requiredScopes = [
+        "repo",
+        "read:org",
+        "read:user",
+        "user:email",
+        "gist",
+        "workflow",
+      ];
+      const missingScopes = requiredScopes.filter(
+        (scope) => !verification.scopes.includes(scope)
+      );
+
+      if (missingScopes.length > 0) {
+        setError(
+          `Token missing required scopes: ${missingScopes.join(
+            ", "
+          )}. Please ensure your OAuth app requests these scopes: ${requiredScopes.join(
+            ", "
+          )}`
+        );
+        setStep("setup");
+        setIsVerifying(false);
+        return;
+      }
+
+      await saveAuth(result.accessToken, clientId, clientSecret);
+      setIsVerifying(false);
+      setOAuth(null);
+      onAuthComplete(result.accessToken);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Unknown error occurred";
+      setError(`OAuth failed: ${errorMessage}`);
+      setStep("setup");
+      setIsVerifying(false);
+      setOAuth(null);
+    }
+  };
+
+  if (step === "intro") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          🔐 GitHub OAuth Authentication Setup
+        </SafeText>
+        <SafeText>Welcome to Copilot PR Monitor!</SafeText>
+        <SafeText> </SafeText>
+        <SafeText>
+          This tool will guide you through setting up OAuth authentication with
+          GitHub.
+        </SafeText>
+        <SafeText>
+          This is more secure than using Personal Access Tokens and provides a
+          better user experience.
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText bold color="yellow">
+          What you'll need:
+        </SafeText>
+        <SafeText>• A GitHub OAuth App (we'll help you create one)</SafeText>
+        <SafeText>• Access to a web browser</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          The OAuth app will need these scopes: repo, read:org, read:user,
+          user:email, gist, workflow
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText>Press Enter to continue...</SafeText>
+      </AuthFlowWrapper>
+    );
+  }
+
+  if (step === "setup") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          GitHub OAuth App Setup
+        </SafeText>
+        <SafeText>First, you need to create a GitHub OAuth App:</SafeText>
+        <SafeText> </SafeText>
+        <SafeText bold>1. Go to GitHub Settings:</SafeText>
+        <SafeText color="blue">https://github.com/settings/developers</SafeText>
+        <SafeText> </SafeText>
+        <SafeText bold>2. Click "New OAuth App"</SafeText>
+        <SafeText> </SafeText>
+        <SafeText bold>3. Fill in the form:</SafeText>
+        <SafeText>
+          • Application name: "Copilot PR Monitor" (or any name you prefer)
+        </SafeText>
+        <SafeText>
+          • Homepage URL: "https://github.com" (or your organization URL)
+        </SafeText>
+        <SafeText>
+          • Authorization callback URL: "http://localhost:3000/callback"
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText bold>4. Click "Register application"</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="yellow">
+          After creating the app, you'll see the Client ID and can generate a
+          Client Secret.
+        </SafeText>
+        <SafeText> </SafeText>
+        <ErrorText error={error} />
+        <SafeText>Ready? Let's enter your OAuth App credentials:</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">Press Enter to continue...</SafeText>
+      </AuthFlowWrapper>
+    );
+  }
+
+  if (step === "clientId") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          GitHub OAuth App - Client ID
+        </SafeText>
+        <SafeText>Enter your GitHub OAuth App Client ID:</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          You can find this on your OAuth App page at:
+          https://github.com/settings/developers
+        </SafeText>
+        <SafeText> </SafeText>
+        <Box>
+          <SafeText>Client ID: </SafeText>
+          <SafeText color="green">{clientId}</SafeText>
+          <SafeText color="gray"> (Type to edit, Enter to confirm)</SafeText>
+        </Box>
+      </AuthFlowWrapper>
+    );
+  }
+
+  if (step === "clientSecret") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          GitHub OAuth App - Client Secret
+        </SafeText>
+        <SafeText>Enter your GitHub OAuth App Client Secret:</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          Click "Generate a new client secret" on your OAuth App page if you
+          haven't already.
+        </SafeText>
+        <SafeText color="yellow">
+          ⚠️ Keep this secret secure! It will be stored locally on your machine.
+        </SafeText>
+        <SafeText> </SafeText>
+        <ErrorText error={error} />
+        <Box>
+          <SafeText>Client Secret: </SafeText>
+          <SafeText color="green">{"*".repeat(clientSecret.length)}</SafeText>
+          <SafeText color="gray"> (Type to edit, Enter to confirm)</SafeText>
+        </Box>
+      </AuthFlowWrapper>
+    );
+  }
+
+  if (step === "authorizing") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          🌐 Opening Browser for Authorization
+        </SafeText>
+        <SafeText>
+          We're opening your default browser to authorize the application.
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="yellow">
+          📋 In the browser, you'll be asked to:
+        </SafeText>
+        <SafeText>• Sign in to GitHub (if not already signed in)</SafeText>
+        <SafeText>• Review the permissions requested</SafeText>
+        <SafeText>• Click "Authorize" to grant access</SafeText>
+        <SafeText> </SafeText>
+        <SafeText color="gray">
+          If the browser doesn't open automatically, check your terminal for any
+          error messages.
+        </SafeText>
+        <SafeText> </SafeText>
+        <SafeText>
+          ⏳ Waiting for authorization... (Press Ctrl+C or Esc to cancel)
+        </SafeText>
+      </AuthFlowWrapper>
+    );
+  }
+
+  if (step === "verify") {
+    return (
+      <AuthFlowWrapper>
+        <SafeText bold color="cyan">
+          ✅ Authorization Successful!
+        </SafeText>
+        <SafeText>Verifying token and checking permissions...</SafeText>
+        <SafeText> </SafeText>
+        {isVerifying && (
+          <SafeText color="yellow">
+            ⏳ Checking token validity and scopes...
+          </SafeText>
+        )}
+      </AuthFlowWrapper>
+    );
+  }
+
+  return (
+    <AuthFlowWrapper>
+      <SafeText>Unexpected state</SafeText>
+    </AuthFlowWrapper>
+  );
+}
+
+export default AuthFlow;

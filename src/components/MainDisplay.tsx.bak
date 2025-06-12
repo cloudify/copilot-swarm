@@ -1,0 +1,521 @@
+import React, { useState, useEffect } from "react";
+import { Box } from "ink";
+import { GitHubAPI } from "../utils/github.js";
+import {
+  MonitorViewProps,
+  LogEntry,
+  PullRequestEvent,
+  PullRequest,
+} from "../types/index.js";
+import { SafeText, ErrorText } from "./ui/index.js";
+import {
+  useErrorState,
+  useTerminalSize,
+  useAnimation,
+} from "../hooks/index.js";
+
+interface Stats {
+  totalPRs: number;
+  activeCopilotJobs: number;
+  monitoredOrgs: number;
+}
+
+function MainDisplay({
+  token,
+  organizations,
+  refreshInterval,
+  days,
+  resumeOnFailure,
+  autoFix,
+  autoApprove,
+}: MonitorViewProps): React.ReactElement {
+  const [prStatuses, setPrStatuses] = useState<
+    Array<PullRequestEvent & { pr: PullRequest }>
+  >([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number>(refreshInterval);
+  const { error, setError } = useErrorState();
+  const [stats, setStats] = useState<Stats>({
+    totalPRs: 0,
+    activeCopilotJobs: 0,
+    monitoredOrgs: organizations.length,
+  });
+  const [username, setUsername] = useState<string>("");
+  const terminalSize = useTerminalSize();
+  const animationFrame = useAnimation(150); // 150ms for smooth animation
+
+  const addLog = (message: string, type: LogEntry["type"] = "info"): void => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs((prev) => [
+      ...prev.slice(-9),
+      {
+        timestamp,
+        message,
+        type,
+      },
+    ]);
+  };
+
+  // Create a clickable hyperlink using terminal escape sequences
+  const createHyperlink = (text: string, url: string): string => {
+    // OSC 8 hyperlink format: \e]8;;URL\e\\TEXT\e]8;;\e\\
+    // Add underline styling for better visual indication of clickable links
+    const underlineStart = "\u001b[4m"; // Start underline
+    const underlineEnd = "\u001b[24m"; // End underline
+    return `\u001b]8;;${url}\u001b\\${underlineStart}${text}${underlineEnd}\u001b]8;;\u001b\\`;
+  };
+
+  // Calculate responsive column widths that account for borders and padding
+  const getColumnWidths = (terminalWidth: number) => {
+    // Reserve space for borders (4 for left/right), padding (4 for container paddingX), and column gaps (9 for 3 gaps of 3 spaces each)
+    const availableWidth = Math.max(40, terminalWidth - 17);
+
+    // Use minimal widths for very small terminals
+    if (availableWidth < 60) {
+      return {
+        statusWidth: 12, // Just emoji + short status
+        titleWidth: Math.max(15, availableWidth - 25), // Remaining space
+        eventWidth: 8, // Very short
+        timeWidth: 5, // Just time
+      };
+    }
+
+    // Use fixed minimum widths for small terminals
+    if (availableWidth < 80) {
+      const minStatusWidth = 18;
+      const minEventWidth = 12;
+      const minTimeWidth = 8;
+      const minFixedWidth = minStatusWidth + minEventWidth + minTimeWidth;
+      const titleWidth = Math.max(20, availableWidth - minFixedWidth);
+
+      return {
+        statusWidth: minStatusWidth,
+        titleWidth,
+        eventWidth: minEventWidth,
+        timeWidth: minTimeWidth,
+      };
+    }
+
+    // Responsive widths for larger terminals
+    return {
+      statusWidth: Math.floor(availableWidth * 0.25),
+      titleWidth: Math.floor(availableWidth * 0.45),
+      eventWidth: Math.floor(availableWidth * 0.2),
+      timeWidth: Math.floor(availableWidth * 0.1),
+    };
+  };
+
+  // Safely truncate text to fit in column
+  const truncateForColumn = (text: string, maxWidth: number): string => {
+    if (!text) return "";
+    if (text.length <= maxWidth) return text;
+    return text.slice(0, Math.max(0, maxWidth - 3)) + "...";
+  };
+
+  const fetchPRStatuses = async (): Promise<void> => {
+    setIsRefreshing(true);
+    addLog("🔄 Refreshing pull request statuses...", "info");
+
+    try {
+      const api = new GitHubAPI(token);
+
+      // Get username if needed for auto features
+      let currentUsername = username;
+      if ((resumeOnFailure || autoFix) && !currentUsername) {
+        try {
+          currentUsername = await api.getUsername();
+          setUsername(currentUsername);
+          if (currentUsername) {
+            addLog(`👤 Fetched username: ${currentUsername}`, "info");
+          } else {
+            addLog(
+              `⚠️ Warning: Could not fetch GitHub username - auto-features requiring comments may not work`,
+              "warning"
+            );
+          }
+        } catch (error) {
+          addLog(
+            `❌ Error fetching username: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`,
+            "error"
+          );
+          addLog(
+            `⚠️ Auto-features requiring comments will be disabled`,
+            "warning"
+          );
+        }
+      }
+
+      // Show enabled features in logs
+      const features: string[] = [];
+      if (resumeOnFailure) features.push("resume-on-failure");
+      if (autoFix) features.push("auto-fix");
+      if (autoApprove) features.push("auto-approve");
+
+      if (features.length > 0) {
+        addLog(`✨ Enabled features: ${features.join(", ")}`, "info");
+
+        // Explain what each feature does
+        if (resumeOnFailure) {
+          addLog(
+            "🔔 Resume on failure: Will automatically nudge Copilot to resume after failures",
+            "info"
+          );
+        }
+        if (autoFix) {
+          addLog(
+            "🔧 Auto-fix: Will automatically request fixes for failed checks after workflow completion",
+            "info"
+          );
+        }
+        if (autoApprove) {
+          addLog(
+            "🔄 Auto-approve: Will automatically trigger workflow reruns when Copilot finishes work",
+            "info"
+          );
+        }
+
+        // Show username for auto features that need it
+        if (resumeOnFailure || autoFix) {
+          if (currentUsername) {
+            addLog(
+              `👤 Using username: ${currentUsername} for auto-feature comments`,
+              "info"
+            );
+          } else {
+            addLog(
+              `⚠️ Warning: No username available for auto-features that require commenting`,
+              "warning"
+            );
+          }
+        }
+      }
+
+      // Validate token scopes if auto-features are enabled
+      if (autoFix || autoApprove) {
+        addLog("🔍 Validating token permissions for auto-features...", "info");
+        const validation = await api.validateWorkflowPermissions();
+        if (!validation.valid) {
+          addLog(`❌ Auto-features disabled: ${validation.message}`, "error");
+          addLog(
+            "💡 Please restart the application to re-authenticate with required scopes",
+            "warning"
+          );
+          // Disable auto-features for this session
+          autoFix = false;
+          autoApprove = false;
+        } else {
+          addLog("✅ Token permissions validated for auto-features", "success");
+        }
+      }
+
+      const options = {
+        resumeOnFailure,
+        username: currentUsername || undefined,
+        autoFix,
+        autoApprove,
+        onLog: addLog,
+      };
+
+      const results = await api.collectPRStatuses(organizations, days, options);
+
+      setPrStatuses(results);
+
+      // Update stats
+      const activeCopilotJobs = results.filter(
+        (result) => result.state === "working"
+      ).length;
+
+      setStats({
+        totalPRs: results.length,
+        activeCopilotJobs,
+        monitoredOrgs: organizations.length,
+      });
+
+      addLog(
+        `📊 Found ${results.length} Copilot PRs, ${activeCopilotJobs} actively working`,
+        "success"
+      );
+
+      // Log recent activity
+      results.slice(0, 3).forEach((result) => {
+        addLog(
+          `${result.emoji} ${result.pr.title} - ${result.status_msg}`,
+          "info"
+        );
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addLog(`❌ Failed to refresh PR statuses: ${message}`, "error");
+      setError(`Failed to refresh PR statuses: ${message}`);
+    } finally {
+      setIsRefreshing(false);
+      setCountdown(refreshInterval);
+    }
+  };
+
+  useEffect(() => {
+    fetchPRStatuses();
+
+    // Add helpful startup message about clickable links
+    addLog(
+      "💡 Tip: PR titles are clickable hyperlinks in modern terminals",
+      "info"
+    );
+    addLog(
+      "💡 Watch the log panel for auto-feature activities (fix, approve, resume)",
+      "info"
+    );
+
+    // Add token scope diagnostics for auto-fix feature
+    if (autoFix) {
+      addLog(
+        "🔍 Auto-fix requires 'repo' scope for commenting - check token if comments aren't posting",
+        "info"
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    token,
+    organizations,
+    refreshInterval,
+    days,
+    resumeOnFailure,
+    autoFix,
+    autoApprove,
+  ]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          fetchPRStatuses();
+          return refreshInterval;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshInterval]);
+
+  const getStatusColor = (result: PullRequestEvent): string => {
+    return result.color;
+  };
+
+  const getLogTypeColor = (type: LogEntry["type"]): string => {
+    switch (type) {
+      case "success":
+        return "green";
+      case "error":
+        return "red";
+      case "warning":
+        return "yellow";
+      case "info":
+      default:
+        return "white";
+    }
+  };
+
+  const formatTime = (result: PullRequestEvent): string => {
+    if (result.timestamp) {
+      return result.timestamp.toLocaleTimeString();
+    }
+    return "N/A";
+  };
+
+  // Calculate available space for the PR list - account for header (3), logs (5), and status bar (1)
+  const availableHeight = Math.max(6, terminalSize.height - 9);
+  const columnWidths = getColumnWidths(terminalSize.width);
+
+  return (
+    <Box flexDirection="column" width="100%" height="100%">
+      <ErrorText error={error} />
+
+      {/* Header */}
+      <Box borderStyle="round" borderColor="cyan" paddingX={1} flexShrink={0}>
+        <Box flexDirection="column" width="100%">
+          <SafeText bold color="cyan">
+            🤖 Copilot PR Monitor
+          </SafeText>
+          <Box flexDirection="row" width="100%">
+            <Box
+              width={columnWidths.statusWidth}
+              flexShrink={0}
+              paddingRight={3}
+            >
+              <SafeText bold>Status</SafeText>
+            </Box>
+            <Box
+              width={columnWidths.titleWidth}
+              flexShrink={0}
+              paddingRight={3}
+            >
+              <SafeText bold>Pull Request</SafeText>
+            </Box>
+            <Box
+              width={columnWidths.eventWidth}
+              flexShrink={0}
+              paddingRight={3}
+            >
+              <SafeText bold>Last Event</SafeText>
+            </Box>
+            <Box width={columnWidths.timeWidth} flexShrink={0}>
+              <SafeText bold>Time</SafeText>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Pull Requests Table */}
+      <Box
+        borderStyle="round"
+        borderColor="gray"
+        height={availableHeight}
+        paddingX={1}
+        flexShrink={0}
+      >
+        <Box flexDirection="column" width="100%">
+          {prStatuses.length === 0 ? (
+            <Box justifyContent="center" alignItems="center" minHeight={3}>
+              <SafeText color="gray">
+                {isRefreshing
+                  ? "Loading pull request statuses..."
+                  : "No Copilot pull requests found"}
+              </SafeText>
+            </Box>
+          ) : (
+            prStatuses.slice(0, availableHeight - 2).map((result, index) => {
+              // Add colorful spinning animation for working status
+              let emoji = result.emoji;
+              let emojiColor = getStatusColor(result);
+
+              if (result.state === "working") {
+                const colorfulSpinnerFrames = [
+                  { char: "⠋", color: "cyan" },
+                  { char: "⠙", color: "blue" },
+                  { char: "⠹", color: "magenta" },
+                  { char: "⠸", color: "red" },
+                  { char: "⠼", color: "yellow" },
+                  { char: "⠴", color: "green" },
+                  { char: "⠦", color: "cyan" },
+                  { char: "⠧", color: "blue" },
+                  { char: "⠇", color: "magenta" },
+                  { char: "⠏", color: "yellow" },
+                  { char: "⠋", color: "green" },
+                  { char: "⠙", color: "red" },
+                ];
+                const frame = animationFrame % colorfulSpinnerFrames.length;
+                emoji = colorfulSpinnerFrames[frame].char;
+                emojiColor = colorfulSpinnerFrames[frame].color;
+              }
+
+              return (
+                <Box key={index} flexDirection="row" width="100%">
+                  {/* Status Column */}
+                  <Box
+                    width={columnWidths.statusWidth}
+                    flexShrink={0}
+                    paddingRight={3}
+                  >
+                    <SafeText color={emojiColor}>
+                      {truncateForColumn(
+                        `${emoji} ${result.status_msg}`,
+                        columnWidths.statusWidth
+                      )}
+                    </SafeText>
+                  </Box>
+
+                  {/* Title Column with Hyperlink */}
+                  <Box
+                    width={columnWidths.titleWidth}
+                    flexShrink={0}
+                    paddingRight={3}
+                  >
+                    <SafeText>
+                      {createHyperlink(
+                        truncateForColumn(
+                          result.pr.title,
+                          columnWidths.titleWidth
+                        ),
+                        result.pr.html_url
+                      )}
+                    </SafeText>
+                  </Box>
+
+                  {/* Event Column */}
+                  <Box
+                    width={columnWidths.eventWidth}
+                    flexShrink={0}
+                    paddingRight={3}
+                  >
+                    <SafeText>
+                      {truncateForColumn(result.time, columnWidths.eventWidth)}
+                    </SafeText>
+                  </Box>
+
+                  {/* Time Column */}
+                  <Box width={columnWidths.timeWidth} flexShrink={0}>
+                    <SafeText>
+                      {truncateForColumn(
+                        formatTime(result),
+                        columnWidths.timeWidth
+                      )}
+                    </SafeText>
+                  </Box>
+                </Box>
+              );
+            })
+          )}
+        </Box>
+      </Box>
+
+      {/* Activity Logs */}
+      <Box
+        borderStyle="round"
+        borderColor="gray"
+        height={5}
+        flexShrink={0}
+        paddingX={1}
+      >
+        <Box flexDirection="column" width="100%">
+          <SafeText bold color="cyan">
+            📜 Recent Events
+          </SafeText>
+          {logs.slice(-3).map((log, index) => (
+            <SafeText key={index} color={getLogTypeColor(log.type)}>
+              {truncateForColumn(
+                `[${log.timestamp}] ${log.message}`,
+                terminalSize.width - 4
+              )}
+            </SafeText>
+          ))}
+        </Box>
+      </Box>
+
+      {/* Status Bar - Compact single row */}
+      <Box flexShrink={0} flexDirection="row">
+        <SafeText>
+          📊 {stats.totalPRs} PRs | 🔄 {stats.activeCopilotJobs} working | 🏢{" "}
+          {stats.monitoredOrgs} orgs |{" "}
+          {isRefreshing ? "🔄 Updating..." : `Next: ${countdown}s`} |{" "}
+        </SafeText>
+        <SafeText color={resumeOnFailure ? "green" : "gray"}>
+          {resumeOnFailure ? "✅ Resume" : "❌ Resume"}
+        </SafeText>
+        <SafeText color={autoFix ? "green" : "gray"}>
+          {autoFix ? " ✅ Fix" : " ❌ Fix"}
+        </SafeText>
+        <SafeText color={autoApprove ? "green" : "gray"}>
+          {autoApprove ? " ✅ Approve" : " ❌ Approve"}
+        </SafeText>
+        <SafeText color="gray"> | Q to quit</SafeText>
+      </Box>
+    </Box>
+  );
+}
+
+export default MainDisplay;

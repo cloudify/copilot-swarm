@@ -1,0 +1,28 @@
+# Ignore artifacts:
+dist
+coverage
+build
+node_modules
+
+# Ignore generated files:
+*.min.js
+*.bundle.js
+
+# Ignore config files that shouldn't be formatted:
+package-lock.json
+yarn.lock
+
+# Ignore documentation files with specific formatting:
+CHANGELOG.md
+
+# Ignore file types that prettier doesn't handle well:
+*.svg
+*.ico
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# Ignore environment files:
+.env*
