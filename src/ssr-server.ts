@@ -1273,17 +1273,11 @@ class SSRMonitorWebServer {
         try {
           if (isPaused) {
             await resumePR(prIdentifier);
-            // Immediately update button state for instant feedback
-            updatePRButton(button, false);
           } else {
             await pausePR(prIdentifier);
-            // Immediately update button state for instant feedback
-            updatePRButton(button, true);
           }
         } catch (error) {
           console.error('Toggle PR failed:', error);
-          // Revert button state on error
-          updatePRButton(button, isPaused);
         } finally {
           button.disabled = false;
         }
