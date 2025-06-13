@@ -990,7 +990,19 @@ class SSRMonitorWebServer {
           ciCell.innerHTML = '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>';
         }
         
-        // Pause button will be updated via pauseStatus events
+        // Preserve the existing pause button in actions cell (index 5)
+        // This ensures the button state isn't lost when updating PR data
+        const actionsCell = row.children[5];
+        if (!actionsCell || !actionsCell.querySelector('.toggle-pr-btn')) {
+          // If button doesn't exist, create it with default state
+          actionsCell.innerHTML = \`
+            <button class="control-btn toggle-pr-btn" 
+                    data-pr-url="\${prData.url}" style="font-size: 12px; padding: 4px 8px;">
+              ⏸️ Pause
+            </button>
+          \`;
+        }
+        // Button state will be updated separately via direct API responses or pauseStatus events
       }
 
       function addNewPRRow(prData) {
