@@ -156,15 +156,15 @@ class SSRMonitorWebServer {
         pauseManager.pausePullRequest(prIdentifier);
         const status = pauseManager.getStatus();
         
-        // Send individual PR update for immediate UI feedback
-        this.broadcastSSE("prPauseUpdate", { 
-          prIdentifier, 
-          isPaused: true,
-          timestamp: new Date().toISOString()
-        });
-        
         this.log(`🔄 Automation paused for PR: ${prIdentifier}`);
-        res.json({ success: true, status });
+        
+        // Return updated button state for immediate UI update
+        res.json({ 
+          success: true, 
+          status,
+          prIdentifier,
+          isPaused: true
+        });
       } catch {
         res.status(500).json({ error: "Failed to pause PR" });
       }
@@ -180,15 +180,15 @@ class SSRMonitorWebServer {
         pauseManager.resumePullRequest(prIdentifier);
         const status = pauseManager.getStatus();
         
-        // Send individual PR update for immediate UI feedback
-        this.broadcastSSE("prPauseUpdate", { 
-          prIdentifier, 
-          isPaused: false,
-          timestamp: new Date().toISOString()
-        });
-        
         this.log(`▶️ Automation resumed for PR: ${prIdentifier}`);
-        res.json({ success: true, status });
+        
+        // Return updated button state for immediate UI update
+        res.json({ 
+          success: true, 
+          status,
+          prIdentifier,
+          isPaused: false
+        });
       } catch {
         res.status(500).json({ error: "Failed to resume PR" });
       }
@@ -871,11 +871,7 @@ class SSRMonitorWebServer {
             console.log('Single PR updated:', data.pr.title);
           });
 
-          eventSource.addEventListener('prPauseUpdate', function(e) {
-            const data = JSON.parse(e.data);
-            updateIndividualPRButton(data.prIdentifier, data.isPaused);
-            console.log('Individual PR pause status updated:', data.prIdentifier, data.isPaused);
-          });
+          // Removed prPauseUpdate SSE handling - now using direct API responses
 
           eventSource.addEventListener('pauseStatus', function(e) {
             const data = JSON.parse(e.data);
@@ -1053,10 +1049,7 @@ class SSRMonitorWebServer {
       }
 
       function updateIndividualPRButton(prIdentifier, isPaused) {
-        const button = document.querySelector(\`[data-pr-url="\${prIdentifier}"]\`);
-        if (button) {
-          updatePRButton(button, isPaused);
-        }
+        // Removed - now handled by direct API responses
       }
 
       function updatePauseStatus(pauseData) {
@@ -1073,8 +1066,8 @@ class SSRMonitorWebServer {
           pauseStatus.textContent = '🔄 Automation: Active';
         }
 
-        // Only update PR buttons during full reconciliation (not for individual changes)
-        // Individual changes are handled by prPauseUpdate events
+        // Only update PR buttons during full reconciliation (startup/periodic sync)
+        // Individual PR button states are managed via direct API responses
         if (pauseData.fullUpdate) {
           const pausedPRs = new Set(pauseData.pausedPullRequests || []);
           document.querySelectorAll('.toggle-pr-btn').forEach(button => {
@@ -1300,20 +1293,20 @@ class SSRMonitorWebServer {
         const isPaused = button.classList.contains('paused-state');
         button.disabled = true;
 
-        // Optimistic update - immediate visual feedback
-        updatePRButton(button, !isPaused);
-
         try {
+          let response;
           if (isPaused) {
-            await resumePR(prIdentifier);
+            response = await resumePR(prIdentifier);
           } else {
-            await pausePR(prIdentifier);
+            response = await pausePR(prIdentifier);
           }
-          // Success - the SSE event will confirm the state
+          
+          // Update button based on server response
+          if (response && response.success) {
+            updatePRButton(button, response.isPaused);
+          }
         } catch (error) {
           console.error('Toggle PR failed:', error);
-          // Revert optimistic update on error
-          updatePRButton(button, isPaused);
           alert(\`Failed to \${isPaused ? 'resume' : 'pause'} PR: \${error.message}\`);
         } finally {
           button.disabled = false;
@@ -1331,6 +1324,7 @@ class SSRMonitorWebServer {
             const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error || \`HTTP \${response.status}\`);
           }
+          return await response.json();
         } catch (error) {
           console.error('Error pausing PR:', error);
           throw error;
@@ -1348,6 +1342,7 @@ class SSRMonitorWebServer {
             const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.error || \`HTTP \${response.status}\`);
           }
+          return await response.json();
         } catch (error) {
           console.error('Error resuming PR:', error);
           throw error;
@@ -1377,16 +1372,28 @@ class SSRMonitorWebServer {
         // Start initial countdown with default interval
         startRefreshCountdown(30);
         
-        // Periodic reconciliation - sync UI state with server every 60 seconds
+        // Simplified periodic reconciliation - only sync global state
         setInterval(async () => {
           try {
             const response = await fetch('/api/pause/status');
             if (response.ok) {
               const pauseData = await response.json();
-              updatePauseStatus({ ...pauseData, fullUpdate: true });
+              // Only update global controls, not individual PR buttons
+              const toggleBtn = document.getElementById('toggle-global-btn');
+              const pauseStatus = document.getElementById('pause-status');
+              
+              if (pauseData.globallyPaused) {
+                toggleBtn.textContent = '▶️ Resume All';
+                toggleBtn.classList.add('paused-state');
+                pauseStatus.textContent = '⏸️ Automation: Paused';
+              } else {
+                toggleBtn.textContent = '⏸️ Pause All';
+                toggleBtn.classList.remove('paused-state');
+                pauseStatus.textContent = '🔄 Automation: Active';
+              }
             }
           } catch (error) {
-            console.warn('Failed to sync pause status:', error);
+            console.warn('Failed to sync global pause status:', error);
           }
         }, 60000);
       });
