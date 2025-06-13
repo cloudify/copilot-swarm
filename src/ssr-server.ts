@@ -1019,6 +1019,8 @@ class SSRMonitorWebServer {
         
         table.appendChild(newRow);
       }
+
+      function updateStatus(status) {
         document.getElementById('total-prs').textContent = status.totalPrs || '-';
         document.getElementById('active-copilot').textContent = status.activeCopilot || '-';
         
@@ -1262,7 +1264,6 @@ class SSRMonitorWebServer {
       }
 
       async function togglePR(prIdentifier) {
-        const pausedPRs = new Set(); // We'll get this from SSE updates
         const button = document.querySelector(\`[data-pr-url="\${prIdentifier}"]\`);
         if (!button) return;
 
@@ -1272,11 +1273,17 @@ class SSRMonitorWebServer {
         try {
           if (isPaused) {
             await resumePR(prIdentifier);
+            // Immediately update button state for instant feedback
+            updatePRButton(button, false);
           } else {
             await pausePR(prIdentifier);
+            // Immediately update button state for instant feedback
+            updatePRButton(button, true);
           }
         } catch (error) {
           console.error('Toggle PR failed:', error);
+          // Revert button state on error
+          updatePRButton(button, isPaused);
         } finally {
           button.disabled = false;
         }
