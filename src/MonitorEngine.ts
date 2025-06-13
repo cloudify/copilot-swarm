@@ -3,6 +3,7 @@ import { GitHubAPI } from "./utils/github.js";
 import type MonitorWebServer from "./server.js";
 import pauseManager from "./utils/pauseManager.js";
 import { humanizeTime, getCIStatus } from "./utils/textUtils.js";
+import { getCachedUsername } from "./utils/monitorHelpers.js";
 
 interface MonitorEngineOptions {
   config: boolean;
@@ -102,7 +103,6 @@ export class MonitorEngine {
         activeCopilot: 0,
         totalSessionTime: "0s",
         totalSessionTimeLoading: true, // Show loading state
-        nextRefresh: "-",
         refreshInterval: this.slowRefreshInterval,
       };
       this.server.updateStatus(initialStatusData);
@@ -249,25 +249,15 @@ export class MonitorEngine {
         throw new Error("API not initialized");
       }
 
-      // Get username if needed for auto features (cache it to avoid logging every time)
+      // Get username if needed for auto features (use common caching logic)
       let username = "";
       if (this.options.resumeOnFailure || this.options.autoFix) {
-        if (this.cachedUsername === null) {
-          try {
-            username = await this.api.getUsername();
-            this.cachedUsername = username;
-            if (username) {
-              this.server.log(`👤 Using username: ${username}`);
-            }
-          } catch {
-            this.server.log(
-              `⚠️ Warning: Could not fetch GitHub username - auto-features requiring comments may not work`
-            );
-            this.cachedUsername = "";
-          }
-        } else {
-          username = this.cachedUsername;
-        }
+        username = await getCachedUsername(
+          { cachedUsername: this.cachedUsername },
+          this.api,
+          this.server.log.bind(this.server)
+        );
+        this.cachedUsername = username || "";
       }
 
       // Create options for collectPRStatuses
@@ -419,8 +409,7 @@ export class MonitorEngine {
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
-        nextRefresh: this.getNextRefreshTime(),
-        refreshInterval: this.options.interval,
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.lastStatusData = statusData;
       this.server.updateStatus(statusData);
@@ -450,25 +439,15 @@ export class MonitorEngine {
       this.activePRs.clear();
       this.stablePRs.clear();
 
-      // Get username if needed for auto features (cache it to avoid logging every time)
+      // Get username if needed for auto features (use common caching logic)
       let username = "";
       if (this.options.resumeOnFailure || this.options.autoFix) {
-        if (this.cachedUsername === null) {
-          try {
-            username = await this.api.getUsername();
-            this.cachedUsername = username;
-            if (username) {
-              this.server.log(`👤 Using username: ${username}`);
-            }
-          } catch {
-            this.server.log(
-              `⚠️ Warning: Could not fetch GitHub username - auto-features requiring comments may not work`
-            );
-            this.cachedUsername = "";
-          }
-        } else {
-          username = this.cachedUsername;
-        }
+        username = await getCachedUsername(
+          { cachedUsername: this.cachedUsername },
+          this.api,
+          this.server.log.bind(this.server)
+        );
+        this.cachedUsername = username || "";
       }
 
       // Create options for collectPRStatuses
@@ -524,8 +503,7 @@ export class MonitorEngine {
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
-        nextRefresh: this.getNextRefreshTime(),
-        refreshInterval: this.slowRefreshInterval,
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.lastStatusData = statusData;
       this.server.updateStatus(statusData);
@@ -747,9 +725,9 @@ export class MonitorEngine {
     }
   }
 
-  private getNextRefreshTime(): string {
-    // Return seconds until next refresh for better client-side countdown
-    return `${this.options.interval}s`;
+  private getNextRefreshTime(): number {
+    // Return the refresh interval in seconds for the countdown timer
+    return this.slowRefreshInterval;
   }
 
   private formatTotalSessionTime(): string {
@@ -935,6 +913,7 @@ export class MonitorEngine {
         ...this.lastStatusData,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.server.updateStatus(statusData);
     }
