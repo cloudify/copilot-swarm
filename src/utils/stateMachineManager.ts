@@ -6,6 +6,7 @@ import {
   CopilotStateMachine
 } from "./stateMachine";
 import type { GitHubAPI } from "./github";
+import { collectFailedWorkflowChecks, isWorkflowRunPending } from "./workflowHelpers.js";
 
 export interface PrStateMachineManager {
   prKey: string;
@@ -199,40 +200,15 @@ export class PrStateMachineManagerFactory {
     const sha = prData.head?.sha;
     if (!sha) {return false;}
 
-    const failedChecks: string[] = [];
-
-    // First, identify workflow runs that are in a failed state
-    const failedWorkflowRuns = new Set<number>();
-    for await (const run of this.gitHubAPI.iterWorkflowRuns(owner, repo, sha)) {
-      const status = (run.status || "").toLowerCase();
-      const conclusion = (run.conclusion || "").toLowerCase();
-
-      if (
-        ["action_required", "failure"].includes(conclusion) ||
-        ["action_required", "waiting", "queued", "pending"].includes(status)
-      ) {
-        failedWorkflowRuns.add(run.id);
-      }
-    }
-
-    // Only collect failed checks from workflow runs that are actually in a failed state
-    for await (const run of this.gitHubAPI.iterCheckRuns(owner, repo, sha)) {
-      const conclusion = (run.conclusion || "").toLowerCase();
-      if (
-        conclusion &&
-        !["success", "neutral", "skipped"].includes(conclusion)
-      ) {
-        const completed = this.parseTimestamp(
-          run.completed_at || run.started_at || ""
-        );
-        if (completed && completed > timestamp) {
-          // Only include failed checks if there are any failed workflow runs
-          if (failedWorkflowRuns.size > 0) {
-            failedChecks.push(run.name || "");
-          }
-        }
-      }
-    }
+    // Use common workflow checking logic
+    const { failedChecks, failedWorkflowRuns } = await collectFailedWorkflowChecks({
+      owner,
+      repo,
+      sha,
+      timestampThreshold: timestamp,
+      parseTimestamp: this.parseTimestamp.bind(this),
+      gitHubAPI: this.gitHubAPI
+    });
 
     // Check for failed commit statuses (only if there are failed workflow runs)
     if (failedWorkflowRuns.size > 0) {
@@ -280,40 +256,15 @@ export class PrStateMachineManagerFactory {
     const sha = prData.head?.sha;
     if (!sha || !context.lastEventTimestamp) {return;}
 
-    const failedChecks: string[] = [];
-
-    // First, identify workflow runs that are in a failed state
-    const failedWorkflowRuns = new Set<number>();
-    for await (const run of this.gitHubAPI.iterWorkflowRuns(owner, repo, sha)) {
-      const status = (run.status || "").toLowerCase();
-      const conclusion = (run.conclusion || "").toLowerCase();
-
-      if (
-        ["action_required", "failure"].includes(conclusion) ||
-        ["action_required", "waiting", "queued", "pending"].includes(status)
-      ) {
-        failedWorkflowRuns.add(run.id);
-      }
-    }
-
-    // Only collect failed checks from workflow runs that are actually in a failed state
-    for await (const run of this.gitHubAPI.iterCheckRuns(owner, repo, sha)) {
-      const conclusion = (run.conclusion || "").toLowerCase();
-      if (
-        conclusion &&
-        !["success", "neutral", "skipped"].includes(conclusion)
-      ) {
-        const completed = this.parseTimestamp(
-          run.completed_at || run.started_at || ""
-        );
-        if (completed && completed > context.lastEventTimestamp!) {
-          // Only include failed checks if there are any failed workflow runs
-          if (failedWorkflowRuns.size > 0) {
-            failedChecks.push(run.name || "");
-          }
-        }
-      }
-    }
+    // Use common workflow checking logic
+    const { failedChecks, failedWorkflowRuns } = await collectFailedWorkflowChecks({
+      owner,
+      repo,
+      sha,
+      timestampThreshold: context.lastEventTimestamp,
+      parseTimestamp: this.parseTimestamp.bind(this),
+      gitHubAPI: this.gitHubAPI
+    });
 
     // Check for failed commit statuses (only if there are failed workflow runs)
     if (failedWorkflowRuns.size > 0) {
@@ -367,13 +318,7 @@ export class PrStateMachineManagerFactory {
     const pendingRuns: number[] = [];
 
     for await (const run of this.gitHubAPI.iterWorkflowRuns(owner, repo, sha)) {
-      const status = (run.status || "").toLowerCase();
-      const conclusion = (run.conclusion || "").toLowerCase();
-
-      if (
-        ["action_required", "failure"].includes(conclusion) ||
-        ["action_required", "waiting", "queued", "pending"].includes(status)
-      ) {
+      if (isWorkflowRunPending(run)) {
         pendingRuns.push(run.id);
       }
     }

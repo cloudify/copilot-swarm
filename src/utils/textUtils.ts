@@ -97,39 +97,103 @@ export function isNonEmptyString(value: unknown): value is string {
 /**
  * Convert a timestamp to human-readable relative time
  */
+/**
+ * Common time unit calculations to avoid duplication
+ */
+export interface TimeUnits {
+  seconds: number;
+  minutes: number;
+  hours: number;
+  days: number;
+  weeks: number;
+  months: number;
+}
+
+export function calculateTimeUnits(deltaMs: number): TimeUnits {
+  const seconds = Math.floor(deltaMs / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+  const months = Math.floor(days / 30);
+  
+  return { seconds, minutes, hours, days, weeks, months };
+}
+
+/**
+ * Humanizes time duration from past timestamp
+ */
 export const humanizeTime = (timestamp: string | Date): string => {
   const date = typeof timestamp === "string" ? new Date(timestamp) : timestamp;
   const now = new Date();
   const delta = now.getTime() - date.getTime();
 
-  const seconds = Math.floor(delta / 1000);
+  const { seconds, minutes, hours, days, weeks, months } = calculateTimeUnits(delta);
+
   if (seconds < 60) {
     return "just now";
   }
 
-  const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
     return `${minutes}m ago`;
   }
 
-  const hours = Math.floor(minutes / 60);
   if (hours < 24) {
     return `${hours}h ago`;
   }
 
-  const days = Math.floor(hours / 24);
   if (days < 7) {
     return `${days}d ago`;
   }
 
-  const weeks = Math.floor(days / 7);
   if (weeks < 4) {
     return `${weeks}w ago`;
   }
 
-  const months = Math.floor(days / 30);
   return `${months}mo ago`;
 };
+
+/**
+ * Humanizes time age (similar to humanizeTime but with different format)
+ */
+export function humanizeAge(ts: Date): string {
+  const delta = Date.now() - ts.getTime();
+  const { seconds, minutes, hours, days } = calculateTimeUnits(delta);
+
+  if (seconds < 60) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
+  }
+  if (hours < 24) {
+    return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
+  }
+  return `${days} day${days !== 1 ? "s" : ""} ago`;
+}
+
+/**
+ * Humanizes remaining time (for countdown timers)
+ */
+export function humanizeRemaining(delta: number): string {
+  const { seconds, minutes, hours, days } = calculateTimeUnits(delta);
+
+  if (seconds <= 0) {
+    return "0m";
+  }
+  if (minutes < 60) {
+    return `${Math.ceil(seconds / 60)}m`;
+  }
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+  const remainingHours = hours % 24;
+  if (remainingHours) {
+    return `${days}d ${remainingHours}h`;
+  }
+  return `${days}d`;
+}
 
 /**
  * Get CI status based on workflow runs

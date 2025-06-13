@@ -3,6 +3,13 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import pauseManager from "./utils/pauseManager.js";
+import { 
+  renderCIStatus, 
+  getStatusClass, 
+  truncateText, 
+  formatDate, 
+  formatTime 
+} from "./utils/ssrHelpers.js";
 
 interface ServerOptions {
   port?: number;
@@ -326,7 +333,7 @@ class SSRMonitorWebServer {
                 <div id="log-entries">
                     ${this.logEntries.map(entry => 
                         `<div class="log-entry">
-                            <span class="timestamp">${this.formatTime(new Date(entry.timestamp))}</span> 
+                            <span class="timestamp">${formatTime(new Date(entry.timestamp))}</span> 
                             ${entry.message}
                         </div>`
                     ).join("")}
@@ -346,7 +353,7 @@ class SSRMonitorWebServer {
 
     const rows = this.pullRequests.map(pr => {
       const isPaused = pausedPRs.has(pr.url);
-      const statusClass = this.getStatusClass(pr.copilotStatus);
+      const statusClass = getStatusClass(pr.copilotStatus);
       
       return `
         <tr data-pr-url="${pr.url}">
@@ -357,17 +364,11 @@ class SSRMonitorWebServer {
             <a href="${pr.repository.url}" target="_blank" class="repo-link">${pr.repository.name}</a>
           </td>
           <td>
-            <a href="${pr.url}" target="_blank" class="repo-link">${this.truncateText(pr.title, 50)}</a>
+            <a href="${pr.url}" target="_blank" class="repo-link">${truncateText(pr.title, 50)}</a>
           </td>
-          <td>${pr.updatedAtHuman || this.formatDate(pr.updatedAt)}</td>
+          <td>${pr.updatedAtHuman || formatDate(pr.updatedAt)}</td>
           <td>
-            ${pr.ciStatus ? 
-              `<span class="ci-status ci-${pr.ciStatus.status}" title="${pr.ciStatus.tooltip}">
-                ${pr.ciStatus.status === 'running' ? '<div class="ci-spinner"></div>' : pr.ciStatus.emoji}
-                ${pr.ciStatus.count ? `(${pr.ciStatus.count})` : ""}
-              </span>` :
-              '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>'
-            }
+            ${renderCIStatus(pr.ciStatus)}
           </td>
           <td>
             <button class="control-btn toggle-pr-btn ${isPaused ? "paused-state" : ""}" 
@@ -396,49 +397,6 @@ class SSRMonitorWebServer {
         </tbody>
       </table>
     `;
-  }
-
-  private getStatusClass(status: string): string {
-    if (
-      status.includes("working") ||
-      status.includes("Working") ||
-      status.includes("Copilot is working") ||
-      status.includes("AI Clone Working") ||
-      status.includes("AI NEURAL SWARM ACTIVE") ||
-      status.includes("NEURAL SWARM")
-    ) {
-      return "status-working";
-    } else if (
-      status.includes("✅") ||
-      status.includes("success") ||
-      status.includes("Complete")
-    ) {
-      return "status-success";
-    } else if (
-      status.includes("❌") ||
-      status.includes("error") ||
-      status.includes("failed") ||
-      status.includes("Error") ||
-      status.includes("Malfunction") ||
-      status.includes("💥")
-    ) {
-      return "status-error";
-    } else {
-      return "status-pending";
-    }
-  }
-
-  private truncateText(text: string, maxLength: number): string {
-    return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-  }
-
-  private formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return date.toLocaleDateString() + " " + date.toLocaleTimeString();
-  }
-
-  private formatTime(date: Date): string {
-    return date.toLocaleTimeString();
   }
 
   private renderStyles(): string {
@@ -814,6 +772,73 @@ class SSRMonitorWebServer {
 
   private renderJavaScript(): string {
     return `<script>
+      // Common utility functions (duplicated from server-side for client use)
+      const Utils = {
+        getStatusClass: function(status) {
+          if (
+            status.includes("working") ||
+            status.includes("Working") ||
+            status.includes("Copilot is working") ||
+            status.includes("AI Clone Working") ||
+            status.includes("AI NEURAL SWARM ACTIVE") ||
+            status.includes("NEURAL SWARM")
+          ) {
+            return "status-working";
+          } else if (
+            status.includes("✅") ||
+            status.includes("success") ||
+            status.includes("Complete")
+          ) {
+            return "status-success";
+          } else if (
+            status.includes("❌") ||
+            status.includes("error") ||
+            status.includes("failed") ||
+            status.includes("Error") ||
+            status.includes("Malfunction") ||
+            status.includes("💥")
+          ) {
+            return "status-error";
+          } else {
+            return "status-pending";
+          }
+        },
+        
+        truncateText: function(text, maxLength) {
+          return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
+        },
+        
+        formatDate: function(dateString) {
+          const date = new Date(dateString);
+          return date.toLocaleDateString() + " " + date.toLocaleTimeString();
+        },
+        
+        formatTime: function(date) {
+          return date.toLocaleTimeString();
+        },
+        
+        updateButtonState: function(button, isPaused) {
+          if (isPaused) {
+            button.textContent = '▶️ Resume';
+            button.classList.add('paused-state');
+          } else {
+            button.textContent = '⏸️ Pause';
+            button.classList.remove('paused-state');
+          }
+        },
+        
+        renderCIStatus: function(ciStatus) {
+          if (ciStatus) {
+            return \`<span class="ci-status ci-\${ciStatus.status}" title="\${ciStatus.tooltip}">
+              \${ciStatus.status === 'running' ? '<div class="ci-spinner"></div>' : ciStatus.emoji}
+              \${ciStatus.count ? \`(\${ciStatus.count})\` : ""}
+            </span>\`;
+          } else {
+            return '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>';
+          }
+        }
+      };
+      
       // Matrix Rain Effect for SSR
       function createMatrixRain() {
         const container = document.getElementById("matrixRain");
@@ -961,7 +986,7 @@ class SSRMonitorWebServer {
       }
 
       function updatePRRow(row, prData) {
-        const statusClass = getStatusClass(prData.copilotStatus);
+        const statusClass = Utils.getStatusClass(prData.copilotStatus);
         
         // Update status cell
         const statusCell = row.children[0];
@@ -973,11 +998,11 @@ class SSRMonitorWebServer {
         
         // Update title cell
         const titleCell = row.children[2];
-        titleCell.innerHTML = \`<a href="\${prData.url}" target="_blank" class="repo-link">\${truncateText(prData.title, 50)}</a>\`;
+        titleCell.innerHTML = \`<a href="\${prData.url}" target="_blank" class="repo-link">\${Utils.truncateText(prData.title, 50)}</a>\`;
         
         // Update updated time cell
         const timeCell = row.children[3];
-        timeCell.textContent = prData.updatedAtHuman || formatDate(prData.updatedAt);
+        timeCell.textContent = prData.updatedAtHuman || Utils.formatDate(prData.updatedAt);
         
         // Update CI status cell
         const ciCell = row.children[4];
@@ -1013,7 +1038,7 @@ class SSRMonitorWebServer {
           return;
         }
         
-        const statusClass = getStatusClass(prData.copilotStatus);
+        const statusClass = Utils.getStatusClass(prData.copilotStatus);
         const newRow = document.createElement('tr');
         newRow.setAttribute('data-pr-url', prData.url);
         
@@ -1029,9 +1054,9 @@ class SSRMonitorWebServer {
             <a href="\${prData.repository.url}" target="_blank" class="repo-link">\${prData.repository.name}</a>
           </td>
           <td>
-            <a href="\${prData.url}" target="_blank" class="repo-link">\${truncateText(prData.title, 50)}</a>
+            <a href="\${prData.url}" target="_blank" class="repo-link">\${Utils.truncateText(prData.title, 50)}</a>
           </td>
-          <td>\${prData.updatedAtHuman || formatDate(prData.updatedAt)}</td>
+          <td>\${prData.updatedAtHuman || Utils.formatDate(prData.updatedAt)}</td>
           <td>
             \${prData.ciStatus ? 
               \`<span class="ci-status ci-\${prData.ciStatus.status}" title="\${prData.ciStatus.tooltip}">
@@ -1097,20 +1122,14 @@ class SSRMonitorWebServer {
       }
 
       function updatePRButton(button, isPaused) {
-        if (isPaused) {
-          button.textContent = '▶️ Resume';
-          button.classList.add('paused-state');
-        } else {
-          button.textContent = '⏸️ Pause';
-          button.classList.remove('paused-state');
-        }
+        Utils.updateButtonState(button, isPaused);
       }
 
       function addLogEntry(logData) {
         const logEntries = document.getElementById('log-entries');
         const entry = document.createElement('div');
         entry.className = 'log-entry';
-        entry.innerHTML = \`<span class="timestamp">\${formatTime(new Date())}</span> \${logData.message}\`;
+        entry.innerHTML = \`<span class="timestamp">\${Utils.formatTime(new Date())}</span> \${logData.message}\`;
 
         logEntries.insertBefore(entry, logEntries.firstChild);
 
@@ -1150,7 +1169,7 @@ class SSRMonitorWebServer {
         
         const rows = pullRequests.map(pr => {
           const isPaused = pausedPRs.has(pr.url);
-          const statusClass = getStatusClass(pr.copilotStatus);
+          const statusClass = Utils.getStatusClass(pr.copilotStatus);
           
           return \`
             <tr data-pr-url="\${pr.url}">
@@ -1161,18 +1180,10 @@ class SSRMonitorWebServer {
                 <a href="\${pr.repository.url}" target="_blank" class="repo-link">\${pr.repository.name}</a>
               </td>
               <td>
-                <a href="\${pr.url}" target="_blank" class="repo-link">\${truncateText(pr.title, 50)}</a>
+                <a href="\${pr.url}" target="_blank" class="repo-link">\${Utils.truncateText(pr.title, 50)}</a>
               </td>
-              <td>\${pr.updatedAtHuman || formatDate(pr.updatedAt)}</td>
-              <td>
-                \${pr.ciStatus ? 
-                  \`<span class="ci-status ci-\${pr.ciStatus.status}" title="\${pr.ciStatus.tooltip}">
-                    \${pr.ciStatus.status === 'running' ? '<div class="ci-spinner"></div>' : pr.ciStatus.emoji}
-                    \${pr.ciStatus.count ? \`(\${pr.ciStatus.count})\` : ""}
-                  </span>\` :
-                  '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>'
-                }
-              </td>
+              <td>\${pr.updatedAtHuman || Utils.formatDate(pr.updatedAt)}</td>
+              <td>\${Utils.renderCIStatus(pr.ciStatus)}</td>
               <td>
                 <button class="control-btn toggle-pr-btn \${isPaused ? "paused-state" : ""}" 
                         data-pr-url="\${pr.url}" style="font-size: 12px; padding: 4px 8px;">
@@ -1200,49 +1211,6 @@ class SSRMonitorWebServer {
             </tbody>
           </table>
         \`;
-      }
-
-      function getStatusClass(status) {
-        if (
-          status.includes("working") ||
-          status.includes("Working") ||
-          status.includes("Copilot is working") ||
-          status.includes("AI Clone Working") ||
-          status.includes("AI NEURAL SWARM ACTIVE") ||
-          status.includes("NEURAL SWARM")
-        ) {
-          return "status-working";
-        } else if (
-          status.includes("✅") ||
-          status.includes("success") ||
-          status.includes("Complete")
-        ) {
-          return "status-success";
-        } else if (
-          status.includes("❌") ||
-          status.includes("error") ||
-          status.includes("failed") ||
-          status.includes("Error") ||
-          status.includes("Malfunction") ||
-          status.includes("💥")
-        ) {
-          return "status-error";
-        } else {
-          return "status-pending";
-        }
-      }
-
-      function truncateText(text, maxLength) {
-        return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-      }
-
-      function formatDate(dateString) {
-        const date = new Date(dateString);
-        return date.toLocaleDateString() + " " + date.toLocaleTimeString();
-      }
-
-      function formatTime(date) {
-        return date.toLocaleTimeString();
       }
 
       // API calls for pause/resume functionality

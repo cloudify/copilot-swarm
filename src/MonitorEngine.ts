@@ -3,6 +3,7 @@ import { GitHubAPI } from "./utils/github.js";
 import type MonitorWebServer from "./server.js";
 import pauseManager from "./utils/pauseManager.js";
 import { humanizeTime, getCIStatus } from "./utils/textUtils.js";
+import { getCachedUsername } from "./utils/monitorHelpers.js";
 
 interface MonitorEngineOptions {
   config: boolean;
@@ -248,25 +249,15 @@ export class MonitorEngine {
         throw new Error("API not initialized");
       }
 
-      // Get username if needed for auto features (cache it to avoid logging every time)
+      // Get username if needed for auto features (use common caching logic)
       let username = "";
       if (this.options.resumeOnFailure || this.options.autoFix) {
-        if (this.cachedUsername === null) {
-          try {
-            username = await this.api.getUsername();
-            this.cachedUsername = username;
-            if (username) {
-              this.server.log(`👤 Using username: ${username}`);
-            }
-          } catch {
-            this.server.log(
-              `⚠️ Warning: Could not fetch GitHub username - auto-features requiring comments may not work`
-            );
-            this.cachedUsername = "";
-          }
-        } else {
-          username = this.cachedUsername;
-        }
+        username = await getCachedUsername(
+          { cachedUsername: this.cachedUsername },
+          this.api,
+          this.server.log.bind(this.server)
+        );
+        this.cachedUsername = username || "";
       }
 
       // Create options for collectPRStatuses
@@ -448,25 +439,15 @@ export class MonitorEngine {
       this.activePRs.clear();
       this.stablePRs.clear();
 
-      // Get username if needed for auto features (cache it to avoid logging every time)
+      // Get username if needed for auto features (use common caching logic)
       let username = "";
       if (this.options.resumeOnFailure || this.options.autoFix) {
-        if (this.cachedUsername === null) {
-          try {
-            username = await this.api.getUsername();
-            this.cachedUsername = username;
-            if (username) {
-              this.server.log(`👤 Using username: ${username}`);
-            }
-          } catch {
-            this.server.log(
-              `⚠️ Warning: Could not fetch GitHub username - auto-features requiring comments may not work`
-            );
-            this.cachedUsername = "";
-          }
-        } else {
-          username = this.cachedUsername;
-        }
+        username = await getCachedUsername(
+          { cachedUsername: this.cachedUsername },
+          this.api,
+          this.server.log.bind(this.server)
+        );
+        this.cachedUsername = username || "";
       }
 
       // Create options for collectPRStatuses
