@@ -91,7 +91,7 @@ class SSRMonitorWebServer {
 
       // Send initial data
       this.sendSSE(res, "connected", { message: "Connected to Copilot Monitor" });
-      this.sendSSE(res, "pauseStatus", pauseManager.getStatus());
+      this.sendSSE(res, "pauseStatus", { ...pauseManager.getStatus(), fullUpdate: true });
       this.sendSSE(res, "status", this.status);
       this.sendSSE(res, "pullRequests", this.pullRequests);
 
@@ -126,7 +126,7 @@ class SSRMonitorWebServer {
       try {
         pauseManager.pauseGlobally();
         const status = pauseManager.getStatus();
-        this.broadcastSSE("pauseStatus", status);
+        this.broadcastSSE("pauseStatus", { ...status, fullUpdate: true });
         this.log("🔄 Automation globally paused");
         res.json({ success: true, status });
       } catch {
@@ -138,7 +138,7 @@ class SSRMonitorWebServer {
       try {
         pauseManager.resumeGlobally();
         const status = pauseManager.getStatus();
-        this.broadcastSSE("pauseStatus", status);
+        this.broadcastSSE("pauseStatus", { ...status, fullUpdate: true });
         this.log("▶️ Automation globally resumed");
         res.json({ success: true, status });
       } catch {
@@ -155,7 +155,14 @@ class SSRMonitorWebServer {
         }
         pauseManager.pausePullRequest(prIdentifier);
         const status = pauseManager.getStatus();
-        this.broadcastSSE("pauseStatus", status);
+        
+        // Send individual PR update for immediate UI feedback
+        this.broadcastSSE("prPauseUpdate", { 
+          prIdentifier, 
+          isPaused: true,
+          timestamp: new Date().toISOString()
+        });
+        
         this.log(`🔄 Automation paused for PR: ${prIdentifier}`);
         res.json({ success: true, status });
       } catch {
@@ -172,7 +179,14 @@ class SSRMonitorWebServer {
         }
         pauseManager.resumePullRequest(prIdentifier);
         const status = pauseManager.getStatus();
-        this.broadcastSSE("pauseStatus", status);
+        
+        // Send individual PR update for immediate UI feedback
+        this.broadcastSSE("prPauseUpdate", { 
+          prIdentifier, 
+          isPaused: false,
+          timestamp: new Date().toISOString()
+        });
+        
         this.log(`▶️ Automation resumed for PR: ${prIdentifier}`);
         res.json({ success: true, status });
       } catch {
@@ -184,7 +198,7 @@ class SSRMonitorWebServer {
       try {
         pauseManager.clearAll();
         const status = pauseManager.getStatus();
-        this.broadcastSSE("pauseStatus", status);
+        this.broadcastSSE("pauseStatus", { ...status, fullUpdate: true });
         this.log("🔄 All pause states cleared");
         res.json({ success: true, status });
       } catch {
@@ -857,6 +871,12 @@ class SSRMonitorWebServer {
             console.log('Single PR updated:', data.pr.title);
           });
 
+          eventSource.addEventListener('prPauseUpdate', function(e) {
+            const data = JSON.parse(e.data);
+            updateIndividualPRButton(data.prIdentifier, data.isPaused);
+            console.log('Individual PR pause status updated:', data.prIdentifier, data.isPaused);
+          });
+
           eventSource.addEventListener('pauseStatus', function(e) {
             const data = JSON.parse(e.data);
             updatePauseStatus(data);
@@ -1032,6 +1052,13 @@ class SSRMonitorWebServer {
         }
       }
 
+      function updateIndividualPRButton(prIdentifier, isPaused) {
+        const button = document.querySelector(\`[data-pr-url="\${prIdentifier}"]\`);
+        if (button) {
+          updatePRButton(button, isPaused);
+        }
+      }
+
       function updatePauseStatus(pauseData) {
         const toggleBtn = document.getElementById('toggle-global-btn');
         const pauseStatus = document.getElementById('pause-status');
@@ -1046,15 +1073,18 @@ class SSRMonitorWebServer {
           pauseStatus.textContent = '🔄 Automation: Active';
         }
 
-        // Update PR buttons
-        const pausedPRs = new Set(pauseData.pausedPullRequests || []);
-        document.querySelectorAll('.toggle-pr-btn').forEach(button => {
-          const prUrl = button.getAttribute('data-pr-url');
-          if (prUrl) {
-            const isPaused = pausedPRs.has(prUrl);
-            updatePRButton(button, isPaused);
-          }
-        });
+        // Only update PR buttons during full reconciliation (not for individual changes)
+        // Individual changes are handled by prPauseUpdate events
+        if (pauseData.fullUpdate) {
+          const pausedPRs = new Set(pauseData.pausedPullRequests || []);
+          document.querySelectorAll('.toggle-pr-btn').forEach(button => {
+            const prUrl = button.getAttribute('data-pr-url');
+            if (prUrl) {
+              const isPaused = pausedPRs.has(prUrl);
+              updatePRButton(button, isPaused);
+            }
+          });
+        }
       }
 
       function updatePRButton(button, isPaused) {
@@ -1270,14 +1300,21 @@ class SSRMonitorWebServer {
         const isPaused = button.classList.contains('paused-state');
         button.disabled = true;
 
+        // Optimistic update - immediate visual feedback
+        updatePRButton(button, !isPaused);
+
         try {
           if (isPaused) {
             await resumePR(prIdentifier);
           } else {
             await pausePR(prIdentifier);
           }
+          // Success - the SSE event will confirm the state
         } catch (error) {
           console.error('Toggle PR failed:', error);
+          // Revert optimistic update on error
+          updatePRButton(button, isPaused);
+          alert(\`Failed to \${isPaused ? 'resume' : 'pause'} PR: \${error.message}\`);
         } finally {
           button.disabled = false;
         }
@@ -1291,11 +1328,12 @@ class SSRMonitorWebServer {
             body: JSON.stringify({ prIdentifier }),
           });
           if (!response.ok) {
-            throw new Error('Failed to pause PR');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || \`HTTP \${response.status}\`);
           }
         } catch (error) {
           console.error('Error pausing PR:', error);
-          alert('Failed to pause PR');
+          throw error;
         }
       }
 
@@ -1307,11 +1345,12 @@ class SSRMonitorWebServer {
             body: JSON.stringify({ prIdentifier }),
           });
           if (!response.ok) {
-            throw new Error('Failed to resume PR');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || \`HTTP \${response.status}\`);
           }
         } catch (error) {
           console.error('Error resuming PR:', error);
-          alert('Failed to resume PR');
+          throw error;
         }
       }
 
@@ -1337,6 +1376,19 @@ class SSRMonitorWebServer {
         
         // Start initial countdown with default interval
         startRefreshCountdown(30);
+        
+        // Periodic reconciliation - sync UI state with server every 60 seconds
+        setInterval(async () => {
+          try {
+            const response = await fetch('/api/pause/status');
+            if (response.ok) {
+              const pauseData = await response.json();
+              updatePauseStatus({ ...pauseData, fullUpdate: true });
+            }
+          } catch (error) {
+            console.warn('Failed to sync pause status:', error);
+          }
+        }, 60000);
       });
     </script>`;
   }
