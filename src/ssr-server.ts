@@ -821,6 +821,10 @@ class SSRMonitorWebServer {
       let reconnectAttempts = 0;
       const maxReconnectAttempts = 5;
       const reconnectDelay = 5000;
+      
+      // Countdown timer for next refresh
+      let refreshCountdownInterval = null;
+      let nextRefreshTime = null;
 
       function connectSSE() {
         try {
@@ -835,12 +839,22 @@ class SSRMonitorWebServer {
           eventSource.addEventListener('status', function(e) {
             const data = JSON.parse(e.data);
             updateStatus(data);
+            // Start countdown timer when status is updated
+            startRefreshCountdown(data.refreshInterval || 30);
           });
 
           eventSource.addEventListener('pullRequests', function(e) {
             const data = JSON.parse(e.data);
             // No need to update DOM - server already rendered the table
             console.log('Pull requests updated via SSR');
+            // Restart countdown when PR data is refreshed
+            startRefreshCountdown(30); // Default refresh interval
+          });
+
+          eventSource.addEventListener('prUpdate', function(e) {
+            const data = JSON.parse(e.data);
+            updateSinglePR(data.pr);
+            console.log('Single PR updated:', data.pr.title);
           });
 
           eventSource.addEventListener('pauseStatus', function(e) {
@@ -878,7 +892,133 @@ class SSRMonitorWebServer {
         }
       }
 
-      function updateStatus(status) {
+      function startRefreshCountdown(intervalSeconds) {
+        // Clear existing countdown
+        if (refreshCountdownInterval) {
+          clearInterval(refreshCountdownInterval);
+        }
+        
+        // Set the next refresh time
+        nextRefreshTime = Date.now() + (intervalSeconds * 1000);
+        
+        // Update countdown immediately
+        updateRefreshCountdown();
+        
+        // Start countdown interval
+        refreshCountdownInterval = setInterval(updateRefreshCountdown, 1000);
+      }
+
+      function updateRefreshCountdown() {
+        if (!nextRefreshTime) {
+          document.getElementById('next-refresh').textContent = '-';
+          return;
+        }
+        
+        const now = Date.now();
+        const timeLeft = Math.max(0, Math.ceil((nextRefreshTime - now) / 1000));
+        
+        if (timeLeft === 0) {
+          document.getElementById('next-refresh').textContent = 'Refreshing...';
+          // Reset countdown after a brief moment
+          setTimeout(() => {
+            if (refreshCountdownInterval) {
+              clearInterval(refreshCountdownInterval);
+            }
+            document.getElementById('next-refresh').textContent = '-';
+          }, 2000);
+        } else {
+          document.getElementById('next-refresh').textContent = \`\${timeLeft}s\`;
+        }
+      }
+
+      function updateSinglePR(prData) {
+        // Find existing row or create new one
+        let existingRow = document.querySelector(\`tr[data-pr-url="\${prData.url}"]\`);
+        
+        if (existingRow) {
+          // Update existing row
+          updatePRRow(existingRow, prData);
+        } else {
+          // Add new row to table
+          addNewPRRow(prData);
+        }
+      }
+
+      function updatePRRow(row, prData) {
+        const statusClass = getStatusClass(prData.copilotStatus);
+        
+        // Update status cell
+        const statusCell = row.children[0];
+        statusCell.innerHTML = \`<span class="\${statusClass}\${statusClass === 'status-working' ? ' ai-clone-working' : ''}">\${prData.copilotStatus}</span>\`;
+        
+        // Update repository cell
+        const repoCell = row.children[1];
+        repoCell.innerHTML = \`<a href="\${prData.repository.url}" target="_blank" class="repo-link">\${prData.repository.name}</a>\`;
+        
+        // Update title cell
+        const titleCell = row.children[2];
+        titleCell.innerHTML = \`<a href="\${prData.url}" target="_blank" class="repo-link">\${truncateText(prData.title, 50)}</a>\`;
+        
+        // Update updated time cell
+        const timeCell = row.children[3];
+        timeCell.textContent = prData.updatedAtHuman || formatDate(prData.updatedAt);
+        
+        // Update CI status cell
+        const ciCell = row.children[4];
+        if (prData.ciStatus) {
+          ciCell.innerHTML = \`<span class="ci-status ci-\${prData.ciStatus.status}" title="\${prData.ciStatus.tooltip}">
+            \${prData.ciStatus.status === 'running' ? '<div class="ci-spinner"></div>' : prData.ciStatus.emoji}
+            \${prData.ciStatus.count ? \`(\${prData.ciStatus.count})\` : ""}
+          </span>\`;
+        } else {
+          ciCell.innerHTML = '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>';
+        }
+        
+        // Pause button will be updated via pauseStatus events
+      }
+
+      function addNewPRRow(prData) {
+        const table = document.querySelector('.pr-table tbody');
+        if (!table) {
+          // If no table exists, create the full table structure
+          updatePRTable([prData]);
+          return;
+        }
+        
+        const statusClass = getStatusClass(prData.copilotStatus);
+        const newRow = document.createElement('tr');
+        newRow.setAttribute('data-pr-url', prData.url);
+        
+        newRow.innerHTML = \`
+          <td>
+            <span class="\${statusClass}\${statusClass === 'status-working' ? ' ai-clone-working' : ''}">\${prData.copilotStatus}</span>
+          </td>
+          <td>
+            <a href="\${prData.repository.url}" target="_blank" class="repo-link">\${prData.repository.name}</a>
+          </td>
+          <td>
+            <a href="\${prData.url}" target="_blank" class="repo-link">\${truncateText(prData.title, 50)}</a>
+          </td>
+          <td>\${prData.updatedAtHuman || formatDate(prData.updatedAt)}</td>
+          <td>
+            \${prData.ciStatus ? 
+              \`<span class="ci-status ci-\${prData.ciStatus.status}" title="\${prData.ciStatus.tooltip}">
+                \${prData.ciStatus.status === 'running' ? '<div class="ci-spinner"></div>' : prData.ciStatus.emoji}
+                \${prData.ciStatus.count ? \`(\${prData.ciStatus.count})\` : ""}
+              </span>\` :
+              '<span class="ci-status ci-unknown" title="CI status unknown">⚫</span>'
+            }
+          </td>
+          <td>
+            <button class="control-btn toggle-pr-btn" 
+                    data-pr-url="\${prData.url}" style="font-size: 12px; padding: 4px 8px;">
+              ⏸️ Pause
+            </button>
+          </td>
+        \`;
+        
+        table.appendChild(newRow);
+      }
         document.getElementById('total-prs').textContent = status.totalPrs || '-';
         document.getElementById('active-copilot').textContent = status.activeCopilot || '-';
         
@@ -1193,6 +1333,9 @@ class SSRMonitorWebServer {
 
         // Connect to SSE
         connectSSE();
+        
+        // Start initial countdown with default interval
+        startRefreshCountdown(30);
       });
     </script>`;
   }

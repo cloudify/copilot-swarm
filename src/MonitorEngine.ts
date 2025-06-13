@@ -102,7 +102,6 @@ export class MonitorEngine {
         activeCopilot: 0,
         totalSessionTime: "0s",
         totalSessionTimeLoading: true, // Show loading state
-        nextRefresh: "-",
         refreshInterval: this.slowRefreshInterval,
       };
       this.server.updateStatus(initialStatusData);
@@ -419,8 +418,7 @@ export class MonitorEngine {
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
-        nextRefresh: this.getNextRefreshTime(),
-        refreshInterval: this.options.interval,
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.lastStatusData = statusData;
       this.server.updateStatus(statusData);
@@ -524,8 +522,7 @@ export class MonitorEngine {
         activeCopilot: activeCopilot,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
-        nextRefresh: this.getNextRefreshTime(),
-        refreshInterval: this.slowRefreshInterval,
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.lastStatusData = statusData;
       this.server.updateStatus(statusData);
@@ -747,9 +744,9 @@ export class MonitorEngine {
     }
   }
 
-  private getNextRefreshTime(): string {
-    // Return seconds until next refresh for better client-side countdown
-    return `${this.options.interval}s`;
+  private getNextRefreshTime(): number {
+    // Return the refresh interval in seconds for the countdown timer
+    return this.slowRefreshInterval;
   }
 
   private formatTotalSessionTime(): string {
@@ -935,6 +932,7 @@ export class MonitorEngine {
         ...this.lastStatusData,
         totalSessionTime: this.formatTotalSessionTime(),
         totalSessionTimeLoading: false, // Historical time calculation complete
+        refreshInterval: this.getNextRefreshTime(),
       };
       this.server.updateStatus(statusData);
     }
