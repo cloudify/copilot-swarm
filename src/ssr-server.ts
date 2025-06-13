@@ -1017,6 +1017,10 @@ class SSRMonitorWebServer {
         const newRow = document.createElement('tr');
         newRow.setAttribute('data-pr-url', prData.url);
         
+        // Check if PR is currently paused by looking at existing state or fetching from server
+        // Default to non-paused state, button state will be corrected by pauseStatus events
+        const isPaused = false; // Will be updated by subsequent pauseStatus SSE events
+        
         newRow.innerHTML = \`
           <td>
             <span class="\${statusClass}\${statusClass === 'status-working' ? ' ai-clone-working' : ''}">\${prData.copilotStatus}</span>
@@ -1038,9 +1042,9 @@ class SSRMonitorWebServer {
             }
           </td>
           <td>
-            <button class="control-btn toggle-pr-btn" 
+            <button class="control-btn toggle-pr-btn \${isPaused ? "paused-state" : ""}" 
                     data-pr-url="\${prData.url}" style="font-size: 12px; padding: 4px 8px;">
-              ⏸️ Pause
+              \${isPaused ? "▶️ Resume" : "⏸️ Pause"}
             </button>
           </td>
         \`;
@@ -1135,8 +1139,14 @@ class SSRMonitorWebServer {
           return;
         }
 
-        // Get current pause status
-        const pausedPRs = new Set(); // This will be updated via SSE
+        // Get current pause status from existing buttons to preserve state
+        const pausedPRs = new Set();
+        document.querySelectorAll('.toggle-pr-btn.paused-state').forEach(button => {
+          const prUrl = button.getAttribute('data-pr-url');
+          if (prUrl) {
+            pausedPRs.add(prUrl);
+          }
+        });
         
         const rows = pullRequests.map(pr => {
           const isPaused = pausedPRs.has(pr.url);
