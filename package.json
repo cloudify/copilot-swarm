@@ -8,8 +8,7 @@
     "copilot-monitor": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc && npm run build:client",
-    "build:client": "mkdir -p dist/public && cp -r public/* dist/public/ 2>/dev/null || true",
+    "build": "tsc",
     "build:enhanced": "npx tailwindcss -i ./src/styles/crt.css -o ./dist/public/enhanced.css --watch",
     "start": "npm run build && node dist/index.js",
     "dev": "tsx src/index.ts",
