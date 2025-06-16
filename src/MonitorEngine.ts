@@ -1,9 +1,9 @@
+import type MonitorWebServer from "./server.js";
 import { loadConfig, loadOrganizations } from "./utils/config.js";
 import { GitHubAPI } from "./utils/github.js";
-import type MonitorWebServer from "./server.js";
-import pauseManager from "./utils/pauseManager.js";
-import { humanizeTime, getCIStatus } from "./utils/textUtils.js";
 import { getCachedUsername } from "./utils/monitorHelpers.js";
+import pauseManager from "./utils/pauseManager.js";
+import { getCIStatus, humanizeTime } from "./utils/textUtils.js";
 
 interface MonitorEngineOptions {
   config: boolean;
@@ -35,7 +35,7 @@ export class MonitorEngine {
   private stablePRs: Set<string> = new Set(); // URLs of PRs without recent activity
   private fastRefreshInterval: number = 15; // seconds for active PRs (increased from 5)
   private slowRefreshInterval: number = 60; // seconds for stable PRs (increased from 30)
-  
+
   // Session time tracking
   private totalSessionTimeMs: number = 0;
   private historicalSessionTimeMs: number = 0; // Historical completed sessions
@@ -45,7 +45,7 @@ export class MonitorEngine {
   constructor(options: MonitorEngineOptions) {
     this.options = options;
     this.server = options.server;
-    
+
     // Set configurable refresh intervals
     this.fastRefreshInterval = options.fastInterval;
     this.slowRefreshInterval = options.interval;
@@ -60,7 +60,7 @@ export class MonitorEngine {
     // Send current pause status first so pausedPRs Set is populated before buttons are created
     const pauseStatus = pauseManager.getStatus();
     this.server.send("pauseStatus", pauseStatus);
-    
+
     if (this.lastPullRequestData.length > 0) {
       this.server.updatePullRequests(this.lastPullRequestData);
     }
@@ -91,12 +91,16 @@ export class MonitorEngine {
       this.server.log(
         `Monitoring ${this.repositories.length} repositories and ${this.organizations.length} organizations`
       );
-      this.server.log(`Slow refresh interval: ${this.slowRefreshInterval} seconds for stable PRs`);
-      this.server.log(`Fast refresh interval: ${this.fastRefreshInterval} seconds for active PRs`);
+      this.server.log(
+        `Slow refresh interval: ${this.slowRefreshInterval} seconds for stable PRs`
+      );
+      this.server.log(
+        `Fast refresh interval: ${this.fastRefreshInterval} seconds for active PRs`
+      );
 
       // Start monitoring loop
       this.isRunning = true;
-      
+
       // Send initial loading status
       const initialStatusData = {
         totalPrs: 0,
@@ -106,10 +110,10 @@ export class MonitorEngine {
         refreshInterval: this.slowRefreshInterval,
       };
       this.server.updateStatus(initialStatusData);
-      
+
       // Initialize historical session time
       await this.initializeHistoricalSessionTime();
-      
+
       await this.refreshAllData();
 
       // Set up dual refresh intervals
@@ -337,7 +341,9 @@ export class MonitorEngine {
                   }
                 }
                 // Limit to avoid performance issues
-                if (workflowRuns.length >= 5) {break;}
+                if (workflowRuns.length >= 5) {
+                  break;
+                }
               }
             }
 
@@ -386,9 +392,9 @@ export class MonitorEngine {
           ciStatus: ciStatus,
           workflowRuns: workflowRuns,
         };
-        
+
         webData.push(prData);
-        
+
         // Add small delay between processing each PR to reduce CPU load
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
@@ -482,7 +488,7 @@ export class MonitorEngine {
       for (const result of results) {
         const transformedData = await this.transformPRData(result);
         webData.push(transformedData);
-        
+
         // Add small delay between processing each PR to reduce CPU load
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
@@ -527,7 +533,9 @@ export class MonitorEngine {
     }
 
     try {
-      this.server.log(`Fast refresh: Updating ${this.activePRs.size} active PRs`);
+      this.server.log(
+        `Fast refresh: Updating ${this.activePRs.size} active PRs`
+      );
       // For now, refresh only a subset of active PRs
       // TODO: Implement targeted refresh for specific PRs
       await this.refreshTargetedPRs(Array.from(this.activePRs));
@@ -542,7 +550,9 @@ export class MonitorEngine {
 
   private async refreshStablePRs(): Promise<void> {
     try {
-      this.server.log(`Slow refresh: Checking for new PRs and updating stable PRs`);
+      this.server.log(
+        `Slow refresh: Checking for new PRs and updating stable PRs`
+      );
       // For initial implementation, do a full refresh periodically
       // This will pick up new PRs and re-categorize existing ones
       await this.refreshAllData();
@@ -558,23 +568,25 @@ export class MonitorEngine {
   private async refreshTargetedPRs(prUrls: string[]): Promise<void> {
     // TODO: Implement targeted refresh for specific PRs
     // For now, we'll do a simplified version that just refreshes a few active PRs
-    this.server.log(`Targeted refresh for ${prUrls.length} PRs (simplified implementation)`);
+    this.server.log(
+      `Targeted refresh for ${prUrls.length} PRs (simplified implementation)`
+    );
   }
 
   private async sendPRUpdate(result: any): Promise<void> {
     try {
       // Transform the single PR result for web interface
       const webData = await this.transformPRData(result);
-      
+
       // Categorize PR based on activity level
       this.categorizePR(result, webData);
-      
+
       // Send incremental update to UI
       this.server.send("prUpdate", {
         pr: webData,
         timestamp: new Date().toISOString(),
       });
-      
+
       this.server.log(`Streamed update for PR: ${result.pr.title}`);
     } catch (error) {
       this.server.log(
@@ -587,21 +599,32 @@ export class MonitorEngine {
 
   private categorizePR(result: any, webData: any): void {
     const prUrl = result.pr.html_url;
-    
+
     // Remove from both sets first
     this.activePRs.delete(prUrl);
     this.stablePRs.delete(prUrl);
-    
+
     // Categorize based on activity
-    const isActive = 
+    const isActive =
       result.state === "working" || // Copilot is actively working
+      result.state === "failed" || // Copilot has failed and needs attention
       (webData.ciStatus && webData.ciStatus.status === "in_progress") || // CI is running
-      (webData.workflowRuns && webData.workflowRuns.some((run: any) => 
-        run.status === "in_progress" || run.status === "queued")); // Workflows running
-    
+      (webData.workflowRuns &&
+        webData.workflowRuns.some(
+          (run: any) => run.status === "in_progress" || run.status === "queued"
+        )); // Workflows running
+
     if (isActive) {
       this.activePRs.add(prUrl);
-      this.server.log(`Categorized as ACTIVE: ${result.pr.title}`);
+      if (result.state === "failed") {
+        this.server.log(
+          `Categorized as ACTIVE (Copilot FAILED): ${result.pr.title}`
+        );
+        // Check if we should post an auto-resume comment
+        this.handleAutoResumeForFailedCopilot(result);
+      } else {
+        this.server.log(`Categorized as ACTIVE: ${result.pr.title}`);
+      }
     } else {
       this.stablePRs.add(prUrl);
       this.server.log(`Categorized as STABLE: ${result.pr.title}`);
@@ -628,11 +651,7 @@ export class MonitorEngine {
 
         if (sha) {
           // First try to fetch workflows for the specific SHA
-          for await (const run of this.api.iterWorkflowRuns(
-            owner,
-            repo,
-            sha
-          )) {
+          for await (const run of this.api.iterWorkflowRuns(owner, repo, sha)) {
             workflowRuns.push(run);
           }
         }
@@ -653,15 +672,14 @@ export class MonitorEngine {
               workflowRuns.push(run);
             } else if (!branch && !sha) {
               // If we don't have branch or SHA info, include recent workflows from main branches
-              if (
-                run.head_branch === "main" ||
-                run.head_branch === "master"
-              ) {
+              if (run.head_branch === "main" || run.head_branch === "master") {
                 workflowRuns.push(run);
               }
             }
             // Limit to avoid performance issues
-            if (workflowRuns.length >= 5) {break;}
+            if (workflowRuns.length >= 5) {
+              break;
+            }
           }
         }
 
@@ -734,23 +752,26 @@ export class MonitorEngine {
     // Calculate total time including historical + current ongoing sessions
     let currentActiveSessionTime = 0;
     const now = new Date();
-    
+
     // Add time for currently active sessions
     for (const startTime of this.workingPRs.values()) {
       currentActiveSessionTime += now.getTime() - startTime.getTime();
     }
-    
-    const totalMs = this.historicalSessionTimeMs + this.totalSessionTimeMs + currentActiveSessionTime;
-    
+
+    const totalMs =
+      this.historicalSessionTimeMs +
+      this.totalSessionTimeMs +
+      currentActiveSessionTime;
+
     if (totalMs === 0) {
       return "0s";
     }
-    
+
     const totalSeconds = Math.floor(totalMs / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    
+
     // Format as human-readable time like "9h 2m 1s"
     const parts = [];
     if (hours > 0) {
@@ -762,17 +783,17 @@ export class MonitorEngine {
     if (seconds > 0 || parts.length === 0) {
       parts.push(`${seconds}s`);
     }
-    
-    return parts.join(' ');
+
+    return parts.join(" ");
   }
 
   private updateSessionTime(results: any[]): void {
     const now = new Date();
-    
+
     // Process each PR to track session timing
     for (const result of results) {
       const prUrl = result.pr.html_url;
-      
+
       if (result.state === "working") {
         // PR is currently working
         if (!this.workingPRs.has(prUrl)) {
@@ -790,10 +811,12 @@ export class MonitorEngine {
           const sessionDuration = now.getTime() - startTime.getTime();
           this.totalSessionTimeMs += sessionDuration;
           this.workingPRs.delete(prUrl);
-          
+
           const sessionMinutes = Math.floor(sessionDuration / 60000);
           const sessionSeconds = Math.floor((sessionDuration % 60000) / 1000);
-          this.server.log(`Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s, total: ${this.formatTotalSessionTime()})`);
+          this.server.log(
+            `Session completed for PR: ${result.pr.title} (${sessionMinutes}m ${sessionSeconds}s, total: ${this.formatTotalSessionTime()})`
+          );
         }
       }
     }
@@ -802,18 +825,21 @@ export class MonitorEngine {
   private async initializeHistoricalSessionTime(): Promise<void> {
     try {
       this.server.log("Calculating historical Copilot session time...");
-      
+
       if (!this.api) {
         throw new Error("API not initialized");
       }
 
       let totalHistoricalTime = 0;
-      
+
       // Get pull requests with Copilot activity
       const results = await this.api.collectPRStatuses(
         this.organizations,
         this.options.days,
-        { onLog: (message, type) => this.server.log(`[${type.toUpperCase()}] ${message}`) }
+        {
+          onLog: (message, type) =>
+            this.server.log(`[${type.toUpperCase()}] ${message}`),
+        }
       );
 
       // Calculate session durations from Copilot events
@@ -831,11 +857,12 @@ export class MonitorEngine {
       }
 
       this.historicalSessionTimeMs = totalHistoricalTime;
-      
+
       const totalMinutes = Math.floor(totalHistoricalTime / 60000);
       const totalSeconds = Math.floor((totalHistoricalTime % 60000) / 1000);
-      this.server.log(`Historical session time calculated: ${totalMinutes}m ${totalSeconds}s`);
-      
+      this.server.log(
+        `Historical session time calculated: ${totalMinutes}m ${totalSeconds}s`
+      );
     } catch (error) {
       this.server.log(
         `Error initializing historical session time: ${
@@ -863,7 +890,7 @@ export class MonitorEngine {
     // Collect copilot events
     const copilotEvents = new Set([
       "copilot_work_started",
-      "copilot_work_finished", 
+      "copilot_work_finished",
       "copilot_work_finished_failure",
     ]);
 
@@ -889,11 +916,12 @@ export class MonitorEngine {
 
     for (const event of events) {
       const eventTime = new Date(event.created_at);
-      
+
       if (event.event === "copilot_work_started") {
         sessionStart = eventTime;
       } else if (
-        (event.event === "copilot_work_finished" || event.event === "copilot_work_finished_failure") &&
+        (event.event === "copilot_work_finished" ||
+          event.event === "copilot_work_finished_failure") &&
         sessionStart
       ) {
         // Calculate session duration
@@ -916,6 +944,97 @@ export class MonitorEngine {
         refreshInterval: this.getNextRefreshTime(),
       };
       this.server.updateStatus(statusData);
+    }
+  }
+
+  private async handleAutoResumeForFailedCopilot(result: any): Promise<void> {
+    if (!this.options.resumeOnFailure || !this.api) {
+      return;
+    }
+
+    const owner = result.pr.base?.repo.owner.login;
+    const repo = result.pr.base?.repo.name;
+    const number = result.pr.number;
+
+    if (!owner || !repo || !number) {
+      return;
+    }
+
+    try {
+      // Get the timestamp of the last failure event
+      const failureTimestamp = result.timestamp;
+      if (!failureTimestamp) {
+        return;
+      }
+
+      // Check if we've already posted a resume comment after this failure
+      const hasRecentResumeComment = await this.hasRecentResumeComment(
+        owner,
+        repo,
+        number,
+        failureTimestamp
+      );
+      if (hasRecentResumeComment) {
+        this.server.log(
+          `[Auto-Resume] Skipping resume comment for ${owner}/${repo}#${number} - already posted after latest failure`
+        );
+        return;
+      }
+
+      // Post the resume comment using the existing postIssueComment method
+      await this.api.postIssueComment(
+        owner,
+        repo,
+        number,
+        "@copilot please resume working on this task"
+      );
+
+      this.server.log(
+        `[Auto-Resume] Posted resume comment for ${owner}/${repo}#${number}`
+      );
+    } catch (error) {
+      this.server.log(
+        `[Auto-Resume] Failed to post resume comment for ${owner}/${repo}#${number}: ${error instanceof Error ? error.message : error}`
+      );
+    }
+  }
+
+  private async hasRecentResumeComment(
+    owner: string,
+    repo: string,
+    number: number,
+    failureTimestamp: Date
+  ): Promise<boolean> {
+    if (!this.api) {
+      return false;
+    }
+
+    try {
+      // Look for resume comments posted after the failure timestamp using iterIssueComments
+      const resumeCommentPattern = /@copilot\s+please\s+resume\s+working/i;
+
+      for await (const comment of this.api.iterIssueComments(
+        owner,
+        repo,
+        number
+      )) {
+        const commentTime = new Date(comment.created_at);
+
+        // Check if this is a resume comment posted after the failure
+        if (
+          commentTime > failureTimestamp &&
+          resumeCommentPattern.test(comment.body || "")
+        ) {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      this.server.log(
+        `[Auto-Resume] Failed to check recent comments for ${owner}/${repo}#${number}: ${error instanceof Error ? error.message : error}`
+      );
+      return false; // Assume no recent comment if we can't check
     }
   }
 }

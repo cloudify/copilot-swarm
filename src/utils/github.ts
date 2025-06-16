@@ -1,21 +1,22 @@
-import type { AxiosInstance} from "axios";
+import type { AxiosInstance } from "axios";
 import axios, { AxiosError } from "axios";
+
 import type {
-  GitHubTokenVerification,
-  PullRequest,
-  GitHubRepository,
-  Organization,
-  CopilotStatus,
-  CopilotEvent,
   CheckRun,
   CommitStatus,
-  WorkflowRun,
-  PullRequestEvent,
+  CopilotEvent,
+  CopilotStatus,
+  GitHubRepository,
+  GitHubTokenVerification,
   IssueComment,
+  Organization,
+  PullRequest,
+  PullRequestEvent,
+  WorkflowRun,
 } from "../types";
-import pauseManager from "./pauseManager.js";
 import { collectFailureLogsAdvanced } from "./errorExtraction.js";
-import { humanizeTime, humanizeAge, humanizeRemaining } from "./textUtils.js";
+import pauseManager from "./pauseManager.js";
+import { humanizeAge, humanizeRemaining, humanizeTime } from "./textUtils.js";
 
 const GITHUB_API_BASE = "https://api.github.com";
 
@@ -106,24 +107,29 @@ const _collectFailureLogs = async (
       // Use individual job logs approach - this returns plain text, not compressed data
       for (const job of failedJobs.slice(0, 3)) {
         try {
-          debugLog(`Fetching logs for job ${job.id} (${job.name}) in run ${runId}`);
-          
+          debugLog(
+            `Fetching logs for job ${job.id} (${job.name}) in run ${runId}`
+          );
+
           const jobLogResponse = await client.get(
             `/repos/${owner}/${repo}/actions/jobs/${job.id}/logs`,
             {
-              headers: { 
+              headers: {
                 Accept: "text/plain",
-                "X-GitHub-Api-Version": "2022-11-28"
+                "X-GitHub-Api-Version": "2022-11-28",
               },
               maxRedirects: 5,
               // Ensure we handle response as text
-              responseType: 'text',
+              responseType: "text",
             }
           );
 
           debugLog(`Job log response received for job ${job.id}`, {
             responseType: typeof jobLogResponse.data,
-            dataLength: typeof jobLogResponse.data === "string" ? jobLogResponse.data.length : "not string",
+            dataLength:
+              typeof jobLogResponse.data === "string"
+                ? jobLogResponse.data.length
+                : "not string",
             status: jobLogResponse.status,
             headers: {
               contentType: jobLogResponse.headers["content-type"],
@@ -134,10 +140,10 @@ const _collectFailureLogs = async (
           const jobLogText = jobLogResponse.data;
           if (typeof jobLogText === "string" && jobLogText.length > 0) {
             const lines = jobLogText.split("\n");
-            
+
             // Extract relevant error lines - look for common error patterns
             const errorLines = lines
-              .filter(line => {
+              .filter((line) => {
                 const lowerLine = line.toLowerCase();
                 return (
                   lowerLine.includes("error") ||
@@ -159,14 +165,16 @@ const _collectFailureLogs = async (
                   lowerLine.includes("compile error") ||
                   // TypeScript specific errors
                   lowerLine.includes("ts(") ||
-                  lowerLine.includes("typescript") && lowerLine.includes("error") ||
+                  (lowerLine.includes("typescript") &&
+                    lowerLine.includes("error")) ||
                   // TypeScript compiler errors (tsc --noemit output)
                   line.match(/^Error: .+\(\d+,\d+\): error TS\d+:/) ||
                   // ESLint specific errors
                   line.match(/^\s*\d+:\d+\s+error/) ||
                   // Jest/test specific errors
                   lowerLine.includes("test failed") ||
-                  lowerLine.includes("expect") && lowerLine.includes("received")
+                  (lowerLine.includes("expect") &&
+                    lowerLine.includes("received"))
                 );
               })
               // Take the last 10 error lines to get the most recent errors
@@ -175,8 +183,8 @@ const _collectFailureLogs = async (
             if (errorLines.length > 0) {
               // Clean up the error lines and remove excessive whitespace
               const cleanErrorLines = errorLines
-                .map(line => line.trim())
-                .filter(line => line.length > 0)
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0)
                 .slice(0, 8); // Limit to 8 lines per job to keep comment manageable
 
               if (cleanErrorLines.length > 0) {
@@ -199,15 +207,16 @@ const _collectFailureLogs = async (
           }
         } catch (jobLogError) {
           debugLog(`Failed to fetch individual job logs for job ${job.id}`, {
-            error: jobLogError instanceof Error ? jobLogError.message : jobLogError,
+            error:
+              jobLogError instanceof Error ? jobLogError.message : jobLogError,
             status: (jobLogError as any)?.response?.status,
             data: (jobLogError as any)?.response?.data,
           });
         }
       }
     } catch (runError) {
-      debugLog(`Failed to fetch run details for run ${runId}`, { 
-        error: runError instanceof Error ? runError.message : runError 
+      debugLog(`Failed to fetch run details for run ${runId}`, {
+        error: runError instanceof Error ? runError.message : runError,
       });
       // Continue with other runs
     }
@@ -215,9 +224,11 @@ const _collectFailureLogs = async (
 
   debugLog(`Log collection completed`, {
     totalLogSamples: logSamples.length,
-    logSamplesSummary: logSamples.map(sample => sample.split('\n')[0]), // Just the job names
-    finalResultLength: logSamples.length > 0 ? 
-      `\n\n**Sample error logs:**\n${logSamples.join("\n\n")}`.length : 0,
+    logSamplesSummary: logSamples.map((sample) => sample.split("\n")[0]), // Just the job names
+    finalResultLength:
+      logSamples.length > 0
+        ? `\n\n**Sample error logs:**\n${logSamples.join("\n\n")}`.length
+        : 0,
   });
 
   return logSamples.length > 0
@@ -352,7 +363,9 @@ export class GitHubAPI {
   // Helper method to generate user-friendly scope error messages
   getScopeErrorMessage(currentScopes: string[]): string | null {
     const missing = this.checkMissingScopes(currentScopes);
-    if (missing.length === 0) {return null;}
+    if (missing.length === 0) {
+      return null;
+    }
 
     return `🔐 Missing required GitHub token scopes: ${missing.join(
       ", "
@@ -796,7 +809,11 @@ export class GitHubAPI {
     } = {}
   ): Promise<Array<PullRequestEvent & { pr: PullRequest }>> {
     try {
-      debugLog("Starting collectPRStatusesStreaming", { owners, days, options });
+      debugLog("Starting collectPRStatusesStreaming", {
+        owners,
+        days,
+        options,
+      });
 
       const prs = await this.searchCopilotPRs(owners, days);
       if (prs.length === 0) {
@@ -883,14 +900,16 @@ export class GitHubAPI {
   ): Promise<(PullRequestEvent & { pr: PullRequest }) | null> {
     debugLog(`Checking ${pr.html_url}`);
 
-    const owner = pr.base!.repo.owner.login;
-    const repo = pr.base!.repo.name;
+    const owner = pr.base?.repo?.owner?.login || "";
+    const repo = pr.base?.repo?.name || "";
     const number = pr.number;
 
     // Collect copilot events
     const events: CopilotEvent[] = [];
+    const allEvents: any[] = []; // Debug: collect all events
     try {
       for await (const event of this.iterIssueEvents(owner, repo, number)) {
+        allEvents.push(event); // Debug: track all events
         if (copilotEvents.has(event.event)) {
           events.push(event);
         }
@@ -914,11 +933,14 @@ export class GitHubAPI {
     // Count completed copilot sessions
     let sessionCount = 0;
     let inSession = false;
-    
+
     for (const event of events) {
       if (event.event === "copilot_work_started") {
         inSession = true;
-      } else if (event.event === "copilot_work_finished" || event.event === "copilot_work_finished_failure") {
+      } else if (
+        event.event === "copilot_work_finished" ||
+        event.event === "copilot_work_finished_failure"
+      ) {
         if (inSession) {
           sessionCount++;
           inSession = false;
@@ -996,22 +1018,15 @@ export class GitHubAPI {
 
               // First, identify workflow runs that are in a failed state
               const failedWorkflowRuns = new Set<number>();
-              for await (const run of this.iterWorkflowRuns(
-                owner,
-                repo,
-                sha
-              )) {
+              for await (const run of this.iterWorkflowRuns(owner, repo, sha)) {
                 const status = (run.status || "").toLowerCase();
                 const conclusion = (run.conclusion || "").toLowerCase();
 
                 if (
                   ["action_required", "failure"].includes(conclusion) ||
-                  [
-                    "action_required",
-                    "waiting",
-                    "queued",
-                    "pending",
-                  ].includes(status)
+                  ["action_required", "waiting", "queued", "pending"].includes(
+                    status
+                  )
                 ) {
                   failedWorkflowRuns.add(run.id);
                 }
@@ -1021,11 +1036,7 @@ export class GitHubAPI {
               // Note: Check runs and commit statuses don't directly map to workflow runs,
               // but we can filter by the same criteria: only include checks that failed after
               // the Copilot timestamp AND belong to workflows that are in a failed state
-              for await (const run of this.iterCheckRuns(
-                owner,
-                repo,
-                sha
-              )) {
+              for await (const run of this.iterCheckRuns(owner, repo, sha)) {
                 const conclusion = (run.conclusion || "").toLowerCase();
                 if (
                   conclusion &&
@@ -1064,9 +1075,10 @@ export class GitHubAPI {
               // Filter out ignored jobs (configurable via --ignore-jobs)
               const ignoreJobs = options.ignoreJobs || ["danger"];
               const filteredChecks = failedChecks.filter(
-                (check) => !ignoreJobs.some((ignored: string) => 
-                  check.toLowerCase().includes(ignored.toLowerCase())
-                )
+                (check) =>
+                  !ignoreJobs.some((ignored: string) =>
+                    check.toLowerCase().includes(ignored.toLowerCase())
+                  )
               );
 
               debugLog(`Auto-fix check analysis for ${pr.html_url}:`, {
@@ -1076,7 +1088,7 @@ export class GitHubAPI {
                 allChecks: failedChecks,
                 ignoredJobs: ignoreJobs,
                 filteredOut: failedChecks.filter((check) =>
-                  ignoreJobs.some((ignored: string) => 
+                  ignoreJobs.some((ignored: string) =>
                     check.toLowerCase().includes(ignored.toLowerCase())
                   )
                 ),
@@ -1091,13 +1103,16 @@ export class GitHubAPI {
                 const baseText = FIX_MESSAGES[category];
 
                 // Collect sample logs from failed workflow runs using advanced error extraction
-                debugLog(`Collecting logs for failed workflow runs using advanced extraction`, {
-                  failedWorkflowRunCount: failedWorkflowRuns.size,
-                  failedWorkflowRuns: Array.from(failedWorkflowRuns),
-                  owner,
-                  repo,
-                });
-                
+                debugLog(
+                  `Collecting logs for failed workflow runs using advanced extraction`,
+                  {
+                    failedWorkflowRunCount: failedWorkflowRuns.size,
+                    failedWorkflowRuns: Array.from(failedWorkflowRuns),
+                    owner,
+                    repo,
+                  }
+                );
+
                 const sampleLogs = await collectFailureLogsAdvanced(
                   this.client,
                   owner,
@@ -1108,7 +1123,9 @@ export class GitHubAPI {
                 debugLog(`Log collection completed`, {
                   sampleLogsLength: sampleLogs.length,
                   hasSampleLogs: sampleLogs.length > 0,
-                  sampleLogsPreview: sampleLogs.substring(0, 200) + (sampleLogs.length > 200 ? "..." : ""),
+                  sampleLogsPreview:
+                    sampleLogs.substring(0, 200) +
+                    (sampleLogs.length > 200 ? "..." : ""),
                 });
 
                 const fixText = `${baseText}: ${checksList}${sampleLogs}`;
@@ -1124,12 +1141,7 @@ export class GitHubAPI {
                     "info"
                   );
                   try {
-                    await this.postIssueComment(
-                      owner,
-                      repo,
-                      number,
-                      fixText
-                    );
+                    await this.postIssueComment(owner, repo, number, fixText);
                     autoFixPostedComment = true;
                     statusMsg = "Waiting for Copilot to fix issues";
                     status = "Waiting for Feedback";
@@ -1146,9 +1158,7 @@ export class GitHubAPI {
                   } catch (fixError) {
                     debugLog(`Failed to post fix comment`, {
                       error:
-                        fixError instanceof Error
-                          ? fixError.message
-                          : fixError,
+                        fixError instanceof Error ? fixError.message : fixError,
                       status: axios.isAxiosError(fixError)
                         ? fixError.response?.status
                         : undefined,
@@ -1197,22 +1207,15 @@ export class GitHubAPI {
               );
               const pendingRuns: number[] = [];
 
-              for await (const run of this.iterWorkflowRuns(
-                owner,
-                repo,
-                sha
-              )) {
+              for await (const run of this.iterWorkflowRuns(owner, repo, sha)) {
                 const status = (run.status || "").toLowerCase();
                 const conclusion = (run.conclusion || "").toLowerCase();
 
                 if (
                   ["action_required", "failure"].includes(conclusion) ||
-                  [
-                    "action_required",
-                    "waiting",
-                    "queued",
-                    "pending",
-                  ].includes(status)
+                  ["action_required", "waiting", "queued", "pending"].includes(
+                    status
+                  )
                 ) {
                   pendingRuns.push(run.id);
                 }
@@ -1259,9 +1262,7 @@ export class GitHubAPI {
                     await this.rerunWorkflowRun(owner, repo, runId);
                     rerunSuccessful = true;
                     if (
-                      !statusModifiers.includes(
-                        "full workflow rerun triggered"
-                      )
+                      !statusModifiers.includes("full workflow rerun triggered")
                     ) {
                       statusModifiers.push("full workflow rerun triggered");
                     }
@@ -1319,8 +1320,7 @@ export class GitHubAPI {
             }
           } catch (autoError) {
             debugLog(`Auto-fix/auto-approve error for ${pr.html_url}`, {
-              error:
-                autoError instanceof Error ? autoError.message : autoError,
+              error: autoError instanceof Error ? autoError.message : autoError,
             });
           }
         } // End of pause check else block
@@ -1342,11 +1342,7 @@ export class GitHubAPI {
         waitMinutes = parseInt(waitMatch[1], 10);
       }
 
-      if (
-        options.resumeOnFailure &&
-        timestamp &&
-        waitMinutes !== undefined
-      ) {
+      if (options.resumeOnFailure && timestamp && waitMinutes !== undefined) {
         // Check if automation is paused
         const prIdentifier = pr.html_url;
         if (pauseManager.shouldPauseAutomation(prIdentifier)) {
@@ -1397,9 +1393,7 @@ export class GitHubAPI {
             } catch (nudgeError) {
               debugLog(`Failed to post nudge comment`, {
                 error:
-                  nudgeError instanceof Error
-                    ? nudgeError.message
-                    : nudgeError,
+                  nudgeError instanceof Error ? nudgeError.message : nudgeError,
               });
               options.onLog?.(
                 `❌ Resume on failure failed for ${pr.title}: ${
@@ -1615,7 +1609,7 @@ export class GitHubAPI {
       ) {
         break;
       }
-      
+
       // Add small delay to prevent tight loops and reduce CPU usage
       await new Promise((resolve) => setTimeout(resolve, 100));
       page++;
@@ -1655,7 +1649,7 @@ export class GitHubAPI {
       ) {
         break;
       }
-      
+
       // Add small delay to prevent tight loops and reduce CPU usage
       await new Promise((resolve) => setTimeout(resolve, 100));
       page++;
@@ -1704,7 +1698,7 @@ export class GitHubAPI {
       ) {
         break;
       }
-      
+
       // Add small delay to prevent tight loops and reduce CPU usage
       await new Promise((resolve) => setTimeout(resolve, 100));
       page++;
@@ -1753,7 +1747,7 @@ export class GitHubAPI {
       ) {
         break;
       }
-      
+
       // Add small delay to prevent tight loops and reduce CPU usage
       await new Promise((resolve) => setTimeout(resolve, 100));
       page++;
@@ -1798,7 +1792,7 @@ export class GitHubAPI {
       ) {
         break;
       }
-      
+
       // Add small delay to prevent tight loops and reduce CPU usage
       await new Promise((resolve) => setTimeout(resolve, 100));
       page++;
@@ -2110,7 +2104,11 @@ export class GitHubAPI {
   }
 
   // Get workflow run jobs
-  async getWorkflowJobs(owner: string, repo: string, runId: number): Promise<any[]> {
+  async getWorkflowJobs(
+    owner: string,
+    repo: string,
+    runId: number
+  ): Promise<any[]> {
     try {
       const response = await this.client.get(
         `/repos/${owner}/${repo}/actions/runs/${runId}/jobs`
@@ -2125,8 +2123,17 @@ export class GitHubAPI {
   }
 
   // Collect failure logs for specific workflow runs using advanced error extraction
-  async collectFailureLogs(owner: string, repo: string, failedRunIds: number[]): Promise<string> {
-    return await collectFailureLogsAdvanced(this.client, owner, repo, failedRunIds);
+  async collectFailureLogs(
+    owner: string,
+    repo: string,
+    failedRunIds: number[]
+  ): Promise<string> {
+    return await collectFailureLogsAdvanced(
+      this.client,
+      owner,
+      repo,
+      failedRunIds
+    );
   }
 
   // Expose the client for advanced use cases
