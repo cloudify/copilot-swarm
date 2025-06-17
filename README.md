@@ -77,6 +77,9 @@ npm start
 # Reconfigure repositories
 npm start -- --config
 
+# Clean local status (clear all paused PRs)
+npm start -- --clean-status
+
 # Custom refresh interval (60 seconds)
 npm start -- --interval 60
 

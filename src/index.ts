@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-
 import { program } from "commander";
 import open from "open";
-import MonitorWebServer from "./server.js";
+
 import { MonitorEngine } from "./MonitorEngine.js";
+import MonitorWebServer from "./server.js";
 
 // Configure CLI options
 program
   .name("copilot-monitor")
-  .description("GitHub Copilot PR monitor tool with web interface")
+  .description(
+    "GitHub Copilot PR monitor tool with web interface and pause state management"
+  )
   .version("1.0.0")
   .option("-c, --config", "Reconfigure organizations and repositories")
+  .option("--clean-status", "Clean local status (clear all paused PRs)")
   .option(
     "-i, --interval <seconds>",
     "Slow refresh interval in seconds (stable PRs)",
@@ -57,6 +60,7 @@ const options = program.opts();
 // Create monitor configuration
 const monitorConfig = {
   config: Boolean(options.config),
+  cleanStatus: Boolean(options.cleanStatus),
   interval: parseInt(options.interval, 10),
   fastInterval: parseInt(options.fastInterval, 10),
   days: parseInt(options.days, 10),
@@ -64,7 +68,9 @@ const monitorConfig = {
   autoFix: options.autoFix !== false,
   autoApprove: options.autoApprove !== false,
   maxSessions: parseInt(options.maxSessions, 10),
-  ignoreJobs: options.ignoreJobs ? options.ignoreJobs.split(",").map((job: string) => job.trim()) : ["danger"],
+  ignoreJobs: options.ignoreJobs
+    ? options.ignoreJobs.split(",").map((job: string) => job.trim())
+    : ["danger"],
   port: parseInt(options.port, 10),
   openBrowser: options.open !== false,
 };
@@ -75,6 +81,13 @@ async function main() {
     if (monitorConfig.config) {
       console.log("🚀 Starting GitHub Copilot PR Monitor Configuration...");
       await runConfigurationFlow();
+      return;
+    }
+
+    // Handle clean status mode
+    if (monitorConfig.cleanStatus) {
+      console.log("🧹 Cleaning local status (clearing all paused PRs)...");
+      await runCleanStatusFlow();
       return;
     }
 
@@ -171,6 +184,47 @@ async function runConfigurationFlow() {
     console.log("You can now run 'npx copilot-monitor' to start monitoring.\n");
   } catch (error) {
     console.error("❌ Configuration failed:", error);
+    process.exit(1);
+  }
+}
+
+/**
+ * Clean local status flow - clears all paused PRs
+ */
+async function runCleanStatusFlow() {
+  try {
+    const { pauseManager } = await import("./utils/pauseManager.js");
+
+    // Get current status before cleaning
+    const currentStatus = pauseManager.getStatus();
+
+    console.log("\n📊 Current Status:");
+    console.log(
+      `   Globally paused: ${currentStatus.globallyPaused ? "Yes" : "No"}`
+    );
+    console.log(`   Paused PRs: ${currentStatus.pausedPullRequestCount}`);
+
+    if (currentStatus.pausedPullRequestCount > 0) {
+      console.log("   Paused PR identifiers:");
+      currentStatus.pausedPullRequests.forEach((pr) => {
+        console.log(`     - ${pr}`);
+      });
+    }
+
+    if (currentStatus.pausedAt) {
+      console.log(`   Last paused at: ${currentStatus.pausedAt}`);
+    }
+
+    // Clear all pause states
+    pauseManager.clearAll();
+
+    console.log("\n✅ Local status cleaned successfully!");
+    console.log("   - Global pause state: cleared");
+    console.log("   - All paused PRs: cleared");
+    console.log("   - Timestamps: reset");
+    console.log("\nAll automation features are now enabled for all PRs.\n");
+  } catch (error) {
+    console.error("❌ Failed to clean local status:", error);
     process.exit(1);
   }
 }

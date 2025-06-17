@@ -62,3 +62,28 @@ This approach ensures:
 - Users can selectively disable specific features
 - The internal application logic remains unchanged (still expects boolean values)
 - Backward compatibility is maintained at the code level
+
+## Additional CLI Features
+
+### Clean Status Command
+
+A new `--clean-status` flag has been added to clean the local status (clear all paused PRs):
+
+```bash
+# Clean all paused PR states
+copilot-monitor --clean-status
+```
+
+This command:
+
+- Displays current pause status (globally paused state and paused PRs)
+- Clears all pause states and timestamps
+- Shows confirmation of the cleanup operation
+- Exits after completion (does not start monitoring)
+
+**Use cases:**
+
+- Reset pause states after testing
+- Clear paused PRs when resuming normal operations
+- Debug pause state issues
+- Bulk resume of all paused pull requests
