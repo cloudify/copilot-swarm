@@ -2,263 +2,202 @@
 
 ## Project Overview
 
-The **Copilot Neural Swarm** is a real-time terminal user interface (TUI) tool for monitoring GitHub Copilot activity across pull requests in organizational repositories. Built with TypeScript for enhanced reliability and type safety, this tool provides a sophisticated monitoring solution with OAuth authentication, repository configuration, and live status tracking.
+The **Copilot Neural Swarm** is a sophisticated terminal-based UI tool for monitoring GitHub Copilot activity across pull requests. This is **NOT** a traditional CLI monitoring tool - it's a **hybrid web/terminal application** with dual interfaces: a React-based web UI served via Express and an enhanced terminal UI built with modern web technologies.
 
-### Core Purpose
+### Core Architecture Pattern
 
-- Monitor GitHub Copilot activity across multiple repositories and organizations
-- Provide real-time status updates through a terminal-based interface
-- Track pull request states and associated Copilot jobs
-- Offer debugging capabilities through activity logs and status metrics
+**Dual UI System**: The application runs as a hybrid:
+- **Web Interface** (`src/server.ts`): Express server with React UI at http://localhost:3000  
+- **Terminal Interface** (`src/App.tsx`): Enhanced terminal UI using Framer Motion, Tailwind, and CRT effects
+- **Monitor Engine** (`src/MonitorEngine.ts`): Core business logic shared between both interfaces
 
-### Key Features
+Both interfaces communicate with the same underlying `MonitorEngine` which handles GitHub API integration, state management, and real-time updates.
 
-- 🔐 Secure GitHub OAuth authentication with scope verification
-- ⚙️ Interactive repository and organization configuration
-- 🧱 Full-screen terminal UI with multi-column display
-- 🔁 Configurable auto-refresh intervals (default: 30 seconds)
-- 🤖 Real-time Copilot status detection and tracking
-- 📜 Activity logging with timestamped debug information
-- 📊 Live statistics on PRs, active Copilot jobs, and monitored repositories
-- 🛡️ Type-safe implementation preventing runtime errors
+### Current Implementation Status
+
+**🚨 CRITICAL**: The app is in transition. The terminal UI components have been extensively modernized with:
+- Framer Motion animations and GSAP effects
+- Tailwind CSS styling system
+- Advanced CRT terminal effects (scanlines, glow, flicker)
+- "Hacker-style" neural interface with command routing
+
+The web UI exists but may be out of sync with terminal UI features.
 
 ## Technology Stack
 
 ### Core Framework
+- **TypeScript 5.0+**: Type safety with strict mode enabled
+- **React 19**: Functional components with hooks only
+- **Express**: Web server for dual-interface architecture  
+- **Framer Motion**: Advanced animations and transitions
+- **Tailwind CSS**: Utility-first styling system
 
-- **TypeScript 5.0+**: Primary language for type safety and compile-time error checking
-- **Node.js**: Runtime environment with CommonJS module system
-- **React 17**: Component framework for UI structure
-- **Ink 3.2**: React-based terminal UI framework for cross-platform TUI
+### Terminal Enhancement
+- **CRT Effects**: `src/styles/crt.css` provides retro terminal aesthetics
+- **GSAP**: Animation library for complex effects
+- **Command Router**: `src/components/CommandRouter.tsx` handles terminal commands
 
-### API & Networking
+## Development Patterns
 
-- **Axios**: HTTP client for GitHub API interactions with interceptors and error handling
-- **GitHub REST API v3**: Primary data source for repository and pull request information
+### Safe Rendering Architecture
 
-### CLI & Configuration
-
-- **Commander.js**: Command-line argument parsing and CLI interface
-- **Conf**: Cross-platform configuration storage and management
-- **dotenv**: Environment variable management for development
-
-### Development Tools
-
-- **ESLint 9**: Code linting with TypeScript and React rules
-- **@typescript-eslint**: TypeScript-specific ESLint plugins and parser
-- **ts-node**: Development-time TypeScript execution
-- **Babel**: JSX transformation and React preset handling
-
-## Architecture Overview
-
-### Application Flow
-
-```
-index.ts (CLI Entry) → App.tsx (Main Coordinator) → [AuthFlow | ConfigFlow | MainDisplay]
-```
-
-### Core Components
-
-1. **AuthFlow**: Handles GitHub token authentication and validation
-2. **ConfigFlow**: Manages organization and repository selection
-3. **MainDisplay**: Primary monitoring interface with real-time updates
-4. **GitHubAPI**: Centralized API client with rate limiting and error handling
-5. **Config Utils**: Secure configuration storage and retrieval
-
-### Type System Architecture
-
-All data structures are strongly typed through `src/types/index.ts`:
-
-- `PullRequest`, `GitHubRepository`, `Organization`: GitHub API response types
-- `CopilotStatus`: Enumerated status states for Copilot activity
-- `AuthFlowProps`, `ConfigFlowProps`, `MonitorViewProps`: Component interfaces
-- `LogEntry`: Structured logging with timestamps and severity levels
-
-## Development Standards
-
-### TypeScript Requirements
-
-- **Strict Mode**: All strict TypeScript compiler options enabled
-- **No Any Types**: Explicit typing required for all variables and function parameters
-- **Null Safety**: Strict null checks to prevent runtime errors
-- **Return Types**: Explicit return types for all functions and methods
-- **Interface Definitions**: All component props and data structures must be typed
-
-### Code Style & Formatting
-
-- **String Literals**: Use double quotes consistently (`"string"`)
-- **Function Style**: Prefer arrow functions for callbacks and inline functions
-- **Async Patterns**: Use async/await over Promise chains for better readability
-- **React Patterns**: Functional components with hooks only (no class components)
-- **Import Style**: Named imports preferred, default exports for components
-- **Naming Conventions**: PascalCase for components, camelCase for functions/variables
-
-### Error Handling Patterns
+**CRITICAL PATTERN**: This codebase has strict anti-empty-string rendering due to past crashes:
 
 ```typescript
-// Preferred error handling pattern
-try {
-  const result = await apiCall();
-  return result;
-} catch (error) {
-  if (error instanceof Error) {
-    console.error(`Operation failed: ${error.message}`);
-  }
-  throw error; // Re-throw for upstream handling
-}
+// ❌ NEVER: Direct empty string rendering
+{error && <Text>{error}</Text>}
+
+// ✅ ALWAYS: Validate before rendering
+{error && error.trim() && <Text color="red">{error}</Text>}
 ```
 
-### React/Ink Best Practices
+All text must be wrapped in proper components and validated for empty/undefined values.
 
-- **Empty Text Prevention**: Never render empty strings directly in JSX
-- **Conditional Rendering**: Always check for truthy values before rendering text
-- **Text Wrapping**: All text content must be wrapped in `<Text>` components
-- **Component Structure**: Use `<Box>` for layout, `<Text>` for content display
-- **State Management**: Use React hooks (useState, useEffect) for state management
-
-### Common Anti-Patterns to Avoid
+### Component Structure Standards
 
 ```typescript
-// ❌ DON'T: Render empty strings
-{
-  error && <Text>{error}</Text>;
-} // If error is "", this crashes
-
-// ✅ DO: Validate before rendering
-{
-  error && error.trim() && <Text color="red">{error}</Text>;
+// Standard component pattern
+interface ComponentProps {
+  // Always type props explicitly
+  data: SomeType;
+  onAction: (value: string) => void;
 }
 
-// ❌ DON'T: Use any types
-function processData(data: any): any {}
-
-// ✅ DO: Define proper interfaces
-interface ProcessedData {
-  id: string;
-  value: number;
-}
-function processData(data: RawData): ProcessedData {}
+const Component: React.FC<ComponentProps> = ({ data, onAction }) => {
+  // Use functional components with hooks only
+  const [state, setState] = useState<StateType>(initialValue);
+  
+  return (
+    <motion.div>  {/* Framer Motion for animations */}
+      <Text>{data.title || "Default text"}</Text>
+    </motion.div>
+  );
+};
 ```
 
-## Testing & Quality Assurance
+### GitHub API Integration Pattern
 
-### Linting Requirements
-
-- Run `npm run lint:check` before committing code
-- All ESLint errors must be resolved (warnings acceptable with justification)
-- Custom rules specifically target Ink rendering issues and empty string problems
-- TypeScript compilation must succeed without errors
-
-### Manual Testing Checklist
-
-1. **Authentication Flow**: Test with valid/invalid tokens
-2. **Repository Selection**: Verify organization and repository listing
-3. **Real-time Updates**: Confirm refresh intervals and data accuracy
-4. **Error Scenarios**: Test network failures, API rate limits, invalid repositories
-5. **UI Responsiveness**: Verify layout at different terminal sizes
-
-### Performance Considerations
-
-- **API Rate Limiting**: Respect GitHub API limits (5000 requests/hour for authenticated users)
-- **Refresh Intervals**: Default 30 seconds, configurable via CLI
-- **Memory Management**: Clean up intervals and event listeners in useEffect cleanup
-- **Batch Operations**: Group API calls where possible to minimize requests
-
-## GitHub Integration
-
-### Required Token Scopes
-
-- `repo`: Access to repository data and pull requests
-- `workflow`: Access to GitHub Actions for Copilot event detection
-
-### API Endpoints Used
-
-- `/user`: Token validation and user information
-- `/user/orgs`: Organization listing for authenticated user
-- `/orgs/{org}/repos`: Repository listing for organizations
-- `/repos/{owner}/{repo}/pulls`: Pull request retrieval
-- `/repos/{owner}/{repo}/events`: Event tracking for Copilot activity
-
-### Rate Limit Handling
-
-- Monitor `X-RateLimit-Remaining` headers
-- Implement exponential backoff for rate limit exceeded scenarios
-- Display rate limit information in debug logs
-
-## Configuration Management
-
-### Storage Locations
-
-- **macOS/Linux**: `~/.config/copilot-pr-monitor/`
-- **Windows**: `%APPDATA%/copilot-pr-monitor/`
-
-### Configuration Structure
+The GitHub API client (`src/utils/github.ts`) follows a specific pattern:
 
 ```typescript
-interface AppConfig {
-  token?: string; // GitHub personal access token
-  organizations?: string[]; // Selected organizations to monitor
-  repositories?: string[]; // Selected repositories to monitor
-  refreshInterval?: number; // Auto-refresh interval in seconds
+// Always check authentication first
+if (!this.api) {
+  throw new Error("API not initialized");
 }
+
+// Use streaming for performance  
+for await (const item of this.api.iterResults(query)) {
+  // Process items individually
+  await this.processItem(item);
+}
+
+// Handle rate limiting automatically
+const response = await this.client.get(url);
+// Rate limiting is handled by interceptors
 ```
 
-### Security Considerations
+## Key Development Commands
 
-- Tokens stored in system-secure configuration directories
-- No token logging or console output
-- Validate token scopes before accepting configuration
+```bash
+# Terminal interface development
+npm run dev                    # Development with tsx
+npm run dev:enhanced          # Development with Tailwind watch
 
-## Troubleshooting & Debugging
+# Building and testing
+npm run build                 # TypeScript compilation
+npm start                     # Production build + run
+npm run lint                  # ESLint with TypeScript rules
 
-### Common Issues
+# Debugging
+npm run debug                 # Debug mode with environment vars
+DEBUG=true npm run dev        # Verbose logging
+```
 
-1. **Empty String Rendering**: Check all conditional text rendering
-2. **API Authentication**: Verify token scopes and expiration
-3. **Repository Access**: Confirm user permissions for selected repositories
-4. **Rate Limiting**: Monitor API usage and adjust refresh intervals
+## Critical File Patterns
 
-### Debug Information
+### State Machine Architecture
 
-- Enable verbose logging in development mode
-- Activity log panel shows real-time API calls and responses
-- Status metrics provide quick health checks
-- Error boundaries prevent complete application crashes
+The application uses a sophisticated state machine pattern (`src/utils/stateMachine.ts`) for PR status management:
 
-### Migration Notes
+```typescript
+// State transitions for PR monitoring
+type PRState = "idle" | "working" | "waiting" | "failed" | "max_sessions";
 
-This project was migrated from JavaScript to TypeScript to address persistent empty string rendering errors. The migration provides:
+// Each state has specific transition rules and side effects
+const transitions = {
+  idle: ["working"],
+  working: ["waiting", "failed"],
+  // ... etc
+};
+```
 
-- Compile-time error detection
-- Improved IDE support and autocomplete
-- Better maintainability and debugging capabilities
-- Elimination of runtime crashes from type-related issues
+### Configuration Management
 
-## Contributing Guidelines
+**Location**: `src/utils/config.ts`
+- Cross-platform config storage using `conf` package
+- Encrypted OAuth token storage
+- Organization/repository selection persistence
 
-### Code Review Checklist
+```typescript
+// Configuration is environment-aware
+const config = new Conf<AppConfig>({
+  projectName: "copilot-pr-monitor",
+  encryptionKey: process.env.ENCRYPTION_KEY || "default-key"
+});
+```
 
-- [ ] All new code written in TypeScript with proper type annotations
-- [ ] ESLint passes without errors
-- [ ] TypeScript compilation succeeds
-- [ ] No empty string rendering in React components
-- [ ] Proper error handling with typed catch blocks
-- [ ] Configuration changes tested across platforms
-- [ ] API interactions respect rate limits
-- [ ] Component props properly typed and documented
+### Dual Refresh System
 
-### Development Workflow
+The `MonitorEngine` implements dual refresh intervals:
+- **Fast refresh** (15s): Active PRs with ongoing Copilot activity
+- **Slow refresh** (60s): Stable PRs without recent changes
 
-1. **Setup**: `npm install` to install dependencies
-2. **Development**: `npm run dev` for auto-compilation and testing
-3. **Building**: `npm run build` to compile TypeScript
-4. **Linting**: `npm run lint` to fix auto-fixable issues
-5. **Testing**: `npm start` to test production build
+This optimizes API usage while maintaining real-time updates for active work.
 
-### Future Enhancements
+## Common Pitfalls & Solutions
 
-- WebSocket integration for real-time GitHub events
-- Enhanced filtering and search capabilities
-- Export functionality for monitoring data
-- Multi-tenant support for different GitHub instances
-- Plugin architecture for custom Copilot status detection
+### 1. Component Rendering Issues
+- **Problem**: Empty strings crash the terminal UI
+- **Solution**: Always validate text content before rendering
+- **Pattern**: Use safe rendering utilities from `src/utils/textUtils.ts`
+
+### 2. GitHub API Rate Limits  
+- **Problem**: 5000 requests/hour limit can be hit quickly
+- **Solution**: Use the streaming APIs and batch operations
+- **Monitor**: Check `X-RateLimit-Remaining` headers
+
+### 3. State Synchronization
+- **Problem**: Web and terminal UIs can get out of sync
+- **Solution**: All state changes go through `MonitorEngine`
+- **Pattern**: Use event-driven updates via the server layer
+
+### 4. Animation Performance
+- **Problem**: Complex CRT effects can slow down terminal
+- **Solution**: Effects are configurable in `FIXED_EFFECT_CONFIG`
+- **Debug**: Disable effects when debugging core functionality
+
+## Architecture Decision Records
+
+### Why Dual Interface?
+The application started as a terminal-only tool but evolved to include a web interface for better accessibility and sharing. Both interfaces share the same core engine for consistency.
+
+### Why Framer Motion in Terminal?
+Modern terminal emulators support complex CSS and animations. The enhanced UI provides better UX while maintaining the "hacker terminal" aesthetic.
+
+### Why TypeScript Migration?
+The project was migrated from JavaScript to TypeScript specifically to prevent runtime crashes from empty string rendering and improve developer experience.
+
+## Testing Strategy
+
+```bash
+# Run linting (required before commits)
+npm run lint:check
+
+# Test individual components
+npm run build && node dist/index.js --config
+
+# Debug specific features
+DEBUG=true tsx src/debug-specific-feature.ts
+```
+
+The codebase emphasizes compile-time safety over extensive unit testing, relying on TypeScript's type system and ESLint rules to catch issues early.
