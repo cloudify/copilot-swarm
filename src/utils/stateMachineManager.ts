@@ -1,12 +1,14 @@
+import type { GitHubAPI } from "./github";
 import type {
+  CopilotEvent,
   StateContext,
   StateMachineConfig,
-  CopilotEvent} from "./stateMachine";
-import {
-  CopilotStateMachine
 } from "./stateMachine";
-import type { GitHubAPI } from "./github";
-import { collectFailedWorkflowChecks, isWorkflowRunPending } from "./workflowHelpers.js";
+import { CopilotStateMachine } from "./stateMachine";
+import {
+  collectFailedWorkflowChecks,
+  isWorkflowRunPending,
+} from "./workflowHelpers.js";
 
 export interface PrStateMachineManager {
   prKey: string;
@@ -162,7 +164,9 @@ export class PrStateMachineManagerFactory {
     const { owner, repo, number, stateMachine } = manager;
     const context = stateMachine.getContext();
 
-    if (!context.lastEventTimestamp) {return;}
+    if (!context.lastEventTimestamp) {
+      return;
+    }
 
     // Check for failed checks
     const hasFailedChecks = await this.checkForFailedChecks(
@@ -198,17 +202,20 @@ export class PrStateMachineManagerFactory {
   ): Promise<boolean> {
     const prData = await this.gitHubAPI.fetchPullRequest(owner, repo, number);
     const sha = prData.head?.sha;
-    if (!sha) {return false;}
+    if (!sha) {
+      return false;
+    }
 
     // Use common workflow checking logic
-    const { failedChecks, failedWorkflowRuns } = await collectFailedWorkflowChecks({
-      owner,
-      repo,
-      sha,
-      timestampThreshold: timestamp,
-      parseTimestamp: this.parseTimestamp.bind(this),
-      gitHubAPI: this.gitHubAPI
-    });
+    const { failedChecks, failedWorkflowRuns } =
+      await collectFailedWorkflowChecks({
+        owner,
+        repo,
+        sha,
+        timestampThreshold: timestamp,
+        parseTimestamp: this.parseTimestamp.bind(this),
+        gitHubAPI: this.gitHubAPI,
+      });
 
     // Check for failed commit statuses (only if there are failed workflow runs)
     if (failedWorkflowRuns.size > 0) {
@@ -230,9 +237,10 @@ export class PrStateMachineManagerFactory {
     // Filter out ignored jobs (configurable via --ignore-jobs)
     const ignoreJobs = options.ignoreJobs || ["danger"];
     const filteredChecks = failedChecks.filter(
-      (check) => !ignoreJobs.some((ignored: string) => 
-        check.toLowerCase().includes(ignored.toLowerCase())
-      )
+      (check) =>
+        !ignoreJobs.some((ignored: string) =>
+          check.toLowerCase().includes(ignored.toLowerCase())
+        )
     );
 
     options.onLog?.(
@@ -254,17 +262,20 @@ export class PrStateMachineManagerFactory {
   ): Promise<void> {
     const prData = await this.gitHubAPI.fetchPullRequest(owner, repo, number);
     const sha = prData.head?.sha;
-    if (!sha || !context.lastEventTimestamp) {return;}
+    if (!sha || !context.lastEventTimestamp) {
+      return;
+    }
 
     // Use common workflow checking logic
-    const { failedChecks, failedWorkflowRuns } = await collectFailedWorkflowChecks({
-      owner,
-      repo,
-      sha,
-      timestampThreshold: context.lastEventTimestamp,
-      parseTimestamp: this.parseTimestamp.bind(this),
-      gitHubAPI: this.gitHubAPI
-    });
+    const { failedChecks, failedWorkflowRuns } =
+      await collectFailedWorkflowChecks({
+        owner,
+        repo,
+        sha,
+        timestampThreshold: context.lastEventTimestamp,
+        parseTimestamp: this.parseTimestamp.bind(this),
+        gitHubAPI: this.gitHubAPI,
+      });
 
     // Check for failed commit statuses (only if there are failed workflow runs)
     if (failedWorkflowRuns.size > 0) {
@@ -285,9 +296,10 @@ export class PrStateMachineManagerFactory {
 
     const ignoreJobs = options.ignoreJobs || ["danger"];
     const filteredChecks = failedChecks.filter(
-      (check) => !ignoreJobs.some((ignored: string) => 
-        check.toLowerCase().includes(ignored.toLowerCase())
-      )
+      (check) =>
+        !ignoreJobs.some((ignored: string) =>
+          check.toLowerCase().includes(ignored.toLowerCase())
+        )
     );
 
     if (filteredChecks.length > 0) {
@@ -313,7 +325,9 @@ export class PrStateMachineManagerFactory {
   ): Promise<void> {
     const prData = await this.gitHubAPI.fetchPullRequest(owner, repo, number);
     const sha = prData.head?.sha;
-    if (!sha) {return;}
+    if (!sha) {
+      return;
+    }
 
     const pendingRuns: number[] = [];
 
@@ -378,19 +392,22 @@ export class PrStateMachineManagerFactory {
 
     const prData = await this.gitHubAPI.fetchPullRequest(owner, repo, number);
     const sha = prData.head?.sha;
-    if (!sha) {return;}
+    if (!sha) {
+      return;
+    }
 
     try {
       // Get all running workflow runs
       const runningWorkflowIds = context.runningWorkflowRuns || [];
-      
+
       for (const runId of runningWorkflowIds) {
         // Get jobs for this workflow run
         try {
           const jobs = await this.gitHubAPI.getWorkflowJobs(owner, repo, runId);
-          
+
           const failedJobs = jobs.filter(
-            (job: any) => job.conclusion === "failure" || job.conclusion === "error"
+            (job: any) =>
+              job.conclusion === "failure" || job.conclusion === "error"
           );
 
           if (failedJobs.length > 0) {
@@ -405,13 +422,24 @@ export class PrStateMachineManagerFactory {
 
             // Create a fix comment for the failed jobs
             const baseText = "@copilot fix these CI failures";
-            const checksList = failedJobNames.length > 0 
-              ? `\n\nFailed jobs:\n${failedJobNames.map((name: string) => `- ${name}`).join('\n')}`
-              : "";
+            const checksList =
+              failedJobNames.length > 0
+                ? `\n\nFailed jobs:\n${failedJobNames.map((name: string) => `- ${name}`).join("\n")}`
+                : "";
 
             // Collect failure logs for context
-            const sampleLogs = await this.gitHubAPI.collectFailureLogs(owner, repo, [runId]);
-            const logsText = sampleLogs.length > 0 ? sampleLogs : "";
+            const sampleLogs = await this.gitHubAPI.collectFailureLogs(
+              owner,
+              repo,
+              [runId]
+            );
+            const logsText = sampleLogs; // sampleLogs is already either detailed logs or empty string
+
+            // Debug: Log what we collected
+            options.onLog?.(
+              `🔍 Auto-fix: Collected logs for run ${runId}. Length: ${sampleLogs.length}, Has content: ${sampleLogs.trim().length > 0}`,
+              "info"
+            );
 
             const fixText = `${baseText}${checksList}${logsText}`;
 
@@ -495,7 +523,9 @@ export class PrStateMachineManagerFactory {
 
     const prData = await this.gitHubAPI.fetchPullRequest(owner, repo, number);
     const sha = prData.head?.sha;
-    if (!sha) {return;}
+    if (!sha) {
+      return;
+    }
 
     const runningRuns: number[] = [];
     const completedRuns: number[] = [];
@@ -581,7 +611,9 @@ export class PrStateMachineManagerFactory {
   }
 
   private parseTimestamp(timestampStr: string): Date | null {
-    if (!timestampStr) {return null;}
+    if (!timestampStr) {
+      return null;
+    }
     const parsed = new Date(timestampStr);
     return isNaN(parsed.getTime()) ? null : parsed;
   }
